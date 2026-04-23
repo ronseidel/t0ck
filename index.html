@@ -666,7 +666,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v27 · 20260423</span>
+    <span class="version">v28 · 20260423</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -842,6 +842,7 @@
 // v25 (2026-04-22) — iOS silent-mode audio fix. By default iOS puts all browser Web Audio into the "ringer" audio session category, which means it's muted whenever the phone is in silent mode. Since metronomes are playback content (not alerts), this is the wrong default. Fix: prime a short silent HTMLAudioElement on first user gesture before starting Web Audio. Playing HTML audio flips the iOS audio session to "playback" category, which ignores silent mode. Matches what music apps like Spotify do. Desktop and non-iOS mobile are unaffected since they don't have this ringer/playback distinction.
 // v26 (2026-04-23) — iOS silent-mode diagnostic build. v25's silent-audio trick isn't working on iOS 17+ with speakers (works with headphones, which always bypass silent mode). Added an on-screen diagnostic panel behind a #debug URL hash — tap Start and it shows AudioContext state, silent audio ready state, play promise result, sample rate, and elapsed time since last scheduled click. Temporary — will be removed once the root cause is identified and fixed.
 // v27 (2026-04-23) — fix debug access URL. v26 used #debug as the gate, but the app's URL parser interprets everything after # as BPM/state and rewrites invalid values to defaults — so /#debug was silently redirecting to /#120. Debug gate is now ?debug (query string), which the parser ignores. Access via t0ck.app/?debug or t0ck.app/?debug#120 for debug while keeping a specific BPM.
+// v28 (2026-04-23) — better diagnostics. v27's debug panel showed silentAudio play() as "(not attempted)" even though other signals showed it HAD been called (paused:false, readyState:1). Root cause: playResult was only assigned inside the promise resolve/reject handlers, so a pending promise left it at the initial string. Now playResult is set to "called-pending" synchronously on the .play() invocation, then upgraded to "resolved" or "rejected" when the promise settles. Also bumped the hardcoded version string in the panel header so we stop second-guessing which version is live.
 (function () {
   'use strict';
 
@@ -1149,6 +1150,7 @@
         silentAudio.setAttribute('playsinline', '');
         silentAudio.setAttribute('webkit-playsinline', '');
       }
+      diag.playResult = 'called-pending';
       const p = silentAudio.play();
       if (p && typeof p.then === 'function') {
         p.then(() => { diag.playResult = 'resolved'; })
@@ -1518,7 +1520,7 @@
       const msSinceSchedule = diag.lastScheduledAt > 0 ? Math.round(now - diag.lastScheduledAt) : -1;
 
       panel.textContent =
-        'DEBUG · v26 · ' + (iosLike ? 'iOS-like' : 'other') + '\n' +
+        'DEBUG · v28 · ' + (iosLike ? 'iOS-like' : 'other') + '\n' +
         '------\n' +
         'AudioContext state:  ' + diag.ctxState + '\n' +
         'AudioContext rate:   ' + diag.sampleRate + '\n' +
