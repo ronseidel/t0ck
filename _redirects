@@ -1,0 +1,8 @@
+# Cloudflare Pages redirect rules for t0ck.
+# Rewrites unknown paths to index.html with a 200 status so the app's JS
+# can parse location.pathname (e.g. /90, /90/3-4) as state.
+#
+# Pages checks for an existing static file FIRST, so /og.png, /favicon.ico,
+# and any other real files still serve correctly. Only path misses fall
+# through to this rule.
+/*    /index.html    200

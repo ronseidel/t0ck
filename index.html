@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en" style="background:#F9F9F9;color:#034D32">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>t0ck — simple metronome</title>
+
+<!-- SEO -->
+<meta name="description" content="t0ck is a focused web metronome. Tap tempo, time signatures, subdivisions, four click sounds. No ads, no sign-in, no app to install.">
+<meta name="theme-color" content="#F9F9F9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a1612" media="(prefers-color-scheme: dark)">
+
+<!-- Open Graph -->
+<meta property="og:title" content="t0ck — simple metronome">
+<meta property="og:description" content="Tap tempo, time signatures, subdivisions, four click sounds. No ads, no sign-in.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="0fam">
+<meta property="og:url" content="https://t0ck.app/">
+<meta property="og:image" content="https://t0ck.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="t0ck wordmark on a light green-gray background">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="t0ck — simple metronome">
+<meta name="twitter:description" content="Tap tempo, time signatures, subdivisions, four click sounds.">
+<meta name="twitter:image" content="https://t0ck.app/og.png">
+
+<!-- Favicon: dotted zero brand mark as inline SVG -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20fill%3D%22%23F9F9F9%22%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%226%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2210%22%20fill%3D%22none%22%20stroke%3D%22%23034D32%22%20stroke-width%3D%223%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%222.5%22%20fill%3D%22%23034D32%22%2F%3E%3C%2Fsvg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F9F9F9;
+    --ink: #034D32;
+    --accent: #028454;
+    --accent-bg: #E4F3EE;
+    --border: #C0DDD4;
+    --mint: #00BD78;
+    --muted: #5a7868;
+    /* Role-based vars so the play button and active segment can use their
+       own accent in dark mode without per-element @media overrides. */
+    --play-bg: #034D32;
+    --play-text: #F9F9F9;
+    --seg-active-text: #F9F9F9;
+  }
+
+  /* Dark palette shared between system-preference and manual-toggle paths. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0a1612;
+      --ink: #E4F3EE;
+      --accent: #00BD78;
+      --accent-bg: #0f2a1f;
+      --border: #1f3d2d;
+      --mint: #00BD78;
+      --muted: #7a9a8a;
+      --play-bg: #00BD78;
+      --play-text: #0a1612;
+      --seg-active-text: #0a1612;
+    }
+    :root:not([data-theme="light"]) html,
+    :root:not([data-theme="light"]) body {
+      background: #0a1612 !important;
+      color: #E4F3EE !important;
+    }
+  }
+
+  /* Manual dark override — wins over a system light preference. */
+  :root[data-theme="dark"] {
+    --bg: #0a1612;
+    --ink: #E4F3EE;
+    --accent: #00BD78;
+    --accent-bg: #0f2a1f;
+    --border: #1f3d2d;
+    --mint: #00BD78;
+    --muted: #7a9a8a;
+    --play-bg: #00BD78;
+    --play-text: #0a1612;
+    --seg-active-text: #0a1612;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Branded keyboard-focus rings. :focus-visible fires only for keyboard
+     navigation (tab key), not mouse clicks — so the rings don't appear
+     after every tap. 2px offset so the ring doesn't hug the element. */
+  *:focus { outline: none; }
+  *:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  /* Pill-shaped elements need a matching pill focus ring. */
+  .tap:focus-visible,
+  .play:focus-visible,
+  .settings-btn:focus-visible {
+    outline-offset: 3px;
+    border-radius: 999px;
+  }
+  .nudge:focus-visible,
+  .theme-toggle:focus-visible,
+  .modal-close:focus-visible {
+    border-radius: 50%;
+    outline-offset: 2px;
+  }
+  .seg:focus-visible {
+    outline-offset: 2px;
+    border-radius: 10px;
+  }
+
+  html, body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    max-width: 560px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .version {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  .header-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .theme-toggle {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 120ms, color 120ms, border-color 120ms;
+  }
+
+  .theme-toggle:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .theme-toggle:active { transform: scale(0.92); }
+
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 28px;
+    padding: 32px 0;
+  }
+
+  .beats {
+    display: flex;
+    gap: 14px;
+    min-height: 18px;
+    align-items: center;
+  }
+
+  .beat-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1.5px solid var(--border);
+    transition: transform 80ms ease-out;
+  }
+
+  .beat-dot.downbeat { border-color: var(--accent); }
+
+  .beat-dot.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    transform: scale(1.35);
+  }
+
+  .beat-dot.active.downbeat {
+    background: var(--mint);
+    border-color: var(--mint);
+  }
+
+  .bpm-display {
+    text-align: center;
+    user-select: none;
+  }
+
+  .bpm-number {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 148px;
+    line-height: 0.9;
+    letter-spacing: -0.04em;
+    color: var(--ink);
+    background: none;
+    border: none;
+    outline: none;
+    width: 4ch;
+    text-align: center;
+    padding: 0;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  .bpm-number::-webkit-outer-spin-button,
+  .bpm-number::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .bpm-number:focus {
+    color: var(--accent);
+  }
+
+  .bpm-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  .bpm-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .nudge {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    width: 48px;
+    height: 48px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms;
+  }
+
+  .nudge:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .nudge:active { transform: scale(0.95); }
+
+  .tap {
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 10px 24px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms, color 120ms;
+  }
+
+  .tap:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .tap.flash {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+
+  .play {
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 18px 0;
+    width: 100%;
+    max-width: 320px;
+    background: var(--play-bg);
+    color: var(--play-text);
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 120ms, transform 80ms;
+  }
+
+  .play:hover { opacity: 0.92; }
+  .play:active { transform: scale(0.985); }
+
+  .play.playing {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  footer {
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .settings-btn + .settings-btn::before {
+    content: '·';
+    color: var(--border);
+    margin-right: 4px;
+    pointer-events: none;
+  }
+
+  .settings-btn {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .settings-btn:hover { color: var(--accent); }
+
+  .settings-btn .gear {
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+  }
+
+  .hint {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 8px;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 0.04em;
+  }
+
+  .hint kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    margin: 0 2px;
+  }
+
+  /* ---------- settings modal ---------- */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    transform: translateY(100%);
+    transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+    overflow-y: auto;
+    visibility: hidden;
+  }
+
+  .modal.open {
+    transform: translateY(0);
+    visibility: visible;
+  }
+
+  .modal-inner {
+    max-width: 560px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+  }
+
+  .modal-title {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .modal-close {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink);
+    font-family: 'Space Mono', monospace;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background 120ms, border-color 120ms;
+  }
+
+  .modal-close:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    flex: 1;
+  }
+
+  .group-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .segments {
+    display: flex;
+    gap: 8px;
+  }
+
+  .seg {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 14px 4px;
+    min-height: 48px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms, color 120ms, transform 80ms;
+  }
+
+  .seg:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .seg:active { transform: scale(0.96); }
+
+  .seg.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--seg-active-text);
+  }
+
+  .modal-footer-note {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    padding-top: 24px;
+    margin-top: auto;
+    letter-spacing: 0.03em;
+  }
+
+  /* text-wrap: pretty balances line breaks and avoids widows/orphans on
+     the last line. Supported in Chromium 117+ / Safari 17.4+ / Firefox
+     coming. Non-supporting browsers silently fall back to normal wrap. */
+  .help-lead,
+  .help-note,
+  .help-about,
+  .modal-footer-note {
+    text-wrap: pretty;
+  }
+
+  /* ---------- help modal content ---------- */
+  .keymap, .urlmap {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 10px 20px;
+    align-items: center;
+  }
+
+  .keymap dt,
+  .urlmap dt {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    color: var(--ink);
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .keymap dd,
+  .urlmap dd {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .urlmap dt code {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    background: var(--accent-bg);
+    color: var(--ink);
+    padding: 3px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+  }
+
+  .help-lead {
+    font-size: 13px;
+    color: var(--ink);
+    margin-bottom: 14px;
+    line-height: 1.5;
+  }
+
+  .help-note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+    line-height: 1.5;
+  }
+
+  .help-note code {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    background: var(--accent-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  .help-about {
+    font-size: 13px;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+
+  .help-about a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid var(--border);
+    transition: border-color 120ms;
+  }
+
+  .help-about a:hover { border-bottom-color: var(--accent); }
+
+  @media (max-width: 420px) {
+    .bpm-number { font-size: 112px; }
+    body { padding: 18px; }
+    .modal-inner { padding: 18px; }
+    .seg { padding: 11px 3px; min-height: 44px; font-size: 12px; }
+    .segments { gap: 6px; }
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .modal { transition: none; }
+    .beat-dot { transition: none; }
+  }
+</style>
+</head>
+<body style="background:#F9F9F9;color:#034D32">
+
+<header>
+  <div class="brand">t0ck</div>
+  <div class="header-meta">
+    <span class="version">v18 · 20260422</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
+  </div>
+</header>
+
+<main>
+  <div class="beats" id="beats"></div>
+
+  <div class="bpm-display">
+    <input
+      class="bpm-number"
+      id="bpm"
+      type="number"
+      min="30"
+      max="300"
+      value="120"
+      inputmode="numeric"
+    >
+    <div class="bpm-label">BPM</div>
+  </div>
+
+  <div class="bpm-controls">
+    <button class="nudge" id="minus" aria-label="Decrease BPM">−</button>
+    <button class="tap" id="tap">Tap tempo</button>
+    <button class="nudge" id="plus" aria-label="Increase BPM">+</button>
+  </div>
+
+  <button class="play" id="play">Start</button>
+
+  <div class="hint">
+    <kbd>space</kbd> play/stop · <kbd>↑</kbd><kbd>↓</kbd> BPM · <kbd>T</kbd> tap
+  </div>
+</main>
+
+<footer>
+  <button class="settings-btn" id="openSettings">
+    <span class="gear">◉</span> Settings
+  </button>
+  <button class="settings-btn" id="openHelp">
+    <span class="gear">?</span> Help
+  </button>
+</footer>
+
+<!-- ---------- settings modal ---------- -->
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
+  <div class="modal-inner">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modalTitle">Settings</h2>
+      <button class="modal-close" id="closeSettings" aria-label="Close settings">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="group">
+        <div class="group-label">Time signature</div>
+        <div class="segments" data-group="sig" role="radiogroup" aria-label="Time signature">
+          <button class="seg" data-value="4/4" role="radio">4/4</button>
+          <button class="seg" data-value="3/4" role="radio">3/4</button>
+          <button class="seg" data-value="6/8" role="radio">6/8</button>
+          <button class="seg" data-value="2/4" role="radio">2/4</button>
+          <button class="seg" data-value="5/4" role="radio">5/4</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-label">Subdivision</div>
+        <div class="segments" data-group="sub" role="radiogroup" aria-label="Subdivision">
+          <button class="seg" data-value="off" role="radio">Off</button>
+          <button class="seg" data-value="8" role="radio">8ths</button>
+          <button class="seg" data-value="16" role="radio">16ths</button>
+          <button class="seg" data-value="3" role="radio">Triplets</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-label">Sound</div>
+        <div class="segments" data-group="sound" role="radiogroup" aria-label="Sound">
+          <button class="seg" data-value="sine" role="radio">Sine</button>
+          <button class="seg" data-value="wood" role="radio">Wood</button>
+          <button class="seg" data-value="tick" role="radio">Tick</button>
+          <button class="seg" data-value="beep" role="radio">Beep</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-label">First beat</div>
+        <div class="segments" data-group="accent" role="radiogroup" aria-label="First beat accent">
+          <button class="seg" data-value="on" role="radio">Accent</button>
+          <button class="seg" data-value="off" role="radio">Flat</button>
+        </div>
+      </div>
+
+      <div class="modal-footer-note">
+        Changes apply live. Close when you're done.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- help modal ---------- -->
+<div class="modal" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle" aria-hidden="true">
+  <div class="modal-inner">
+    <div class="modal-header">
+      <h2 class="modal-title" id="helpTitle">Help</h2>
+      <button class="modal-close" id="closeHelp" aria-label="Close help">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="group">
+        <div class="group-label">Keyboard shortcuts</div>
+        <dl class="keymap">
+          <dt><kbd>space</kbd></dt>             <dd>Start / stop</dd>
+          <dt><kbd>↑</kbd> <kbd>↓</kbd></dt>    <dd>Nudge BPM</dd>
+          <dt><kbd>T</kbd></dt>                 <dd>Tap tempo (4 taps averaged)</dd>
+          <dt><kbd>S</kbd></dt>                 <dd>Open settings</dd>
+          <dt><kbd>?</kbd></dt>                 <dd>Open help</dd>
+          <dt><kbd>esc</kbd></dt>               <dd>Close any dialog</dd>
+        </dl>
+      </div>
+
+      <div class="group">
+        <div class="group-label">Bookmarkable URLs</div>
+        <p class="help-lead">Every URL carries a tempo. Bookmark different tempos and open whichever you need.</p>
+        <dl class="urlmap">
+          <dt><code>t0ck.app/90</code></dt>              <dd>90 BPM</dd>
+          <dt><code>t0ck.app/140/3-4</code></dt>         <dd>140 BPM, 3/4 time</dd>
+          <dt><code>t0ck.app/60/4-4/8</code></dt>        <dd>60 BPM, 4/4, 8th-note subdivisions</dd>
+          <dt><code>t0ck.app/90/3-4/8/wood</code></dt>   <dd>Full recall — tempo, time, subs, sound</dd>
+          <dt><code>t0ck.app/90/flat</code></dt>         <dd>90 BPM with no&nbsp;downbeat accent</dd>
+        </dl>
+        <p class="help-note">Time sigs use a dash in the URL (<code>3-4</code>,&nbsp;not&nbsp;<code>3/4</code>). Everything after the tempo is optional. <code>#</code> works too if your browser strips paths.</p>
+      </div>
+
+      <div class="group">
+        <div class="group-label">About</div>
+        <p class="help-about">t0ck is part of <a href="https://0utput.co" target="_blank" rel="noopener">0fam</a>&nbsp;— a family of small, focused web apps from&nbsp;0utput. No accounts, no ads, no&nbsp;tracking.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// t0ck changelog
+// v01 (2026-04-22) — initial (as temp0): lookahead Web Audio scheduler, tap tempo (last 4 taps), time sigs (4/4 3/4 6/8 2/4 5/4), subdivisions (off/8/16/3), URL hash + localStorage state, keyboard shortcuts, dark-mode aware
+// v02 (2026-04-22) — fix: wrap history.replaceState and location.hash reads in try/catch so sandboxed previews (null-origin iframe) degrade silently instead of throwing SecurityError on load
+// v03 (2026-04-22) — add: selectable click sound (sine/wood/tick/beep) in settings, with preview on change; noise buffer cached for tick sound
+// v04 (2026-04-22) — rename temp0 → metr0n0me (Tempo iOS app collision); add OG/Twitter meta suite + inline-SVG dotted-zero favicon; replace bottom-drawer settings with full-screen slide-up modal using segmented controls; live-apply (no save/cancel); ESC key closes modal
+// v05 (2026-04-22) — fix: BPM no longer persists to localStorage (stale tempos from prior sessions were loading as defaults). sig/sub/sound still persist as user preferences. URL hash behavior unchanged — shareable links with #bpm=90 still work. Fresh loads without a hash always start at 120.
+// v06 (2026-04-22) — pretty URLs: #90 loads BPM 90, #90/3-4 adds time sig, #90/3-4/8 adds subdivision, #90/3-4/8/wood adds sound. Omits defaults for short bookmarkable links. Also reads location.pathname so /90 works with 404.html redirect (GH Pages) or _redirects (Cloudflare). Legacy #bpm=90&sig=3/4 still parses for backward compat.
+// v07 (2026-04-22) — rename metr0n0me → t0ck (onomatopoeic, matches 0fam short-name pattern, hosted at t0ck.app). localStorage key updated to t0ck-state; migrates prior metr0n0me-state and temp0-state values so prefs carry over for anyone who touched earlier versions.
+// v08 (2026-04-22) — theme toggle in header (☾/☀). Initial state follows OS prefers-color-scheme; button flips for current session only, no persistence. If OS pref changes mid-session AND user hasn't toggled, we follow. Refactored dark-mode CSS to use [data-theme] selectors alongside @media query so both system and manual paths share one palette definition.
+// v09 (2026-04-22) — S opens settings (symmetric with Escape closing). Branded focus rings using accent color on all interactive elements — replaces browser-default orange/blue ring. Uses :focus-visible so mouse clicks don't show rings, only keyboard tabs do.
+// v10 (2026-04-22) — add Help modal with keyboard shortcuts, URL pattern docs, and about blurb. Footer now has Settings and Help side by side. "?" key opens Help (mirrors "S" for Settings). Removed permanent hint line under play button — shortcuts now live in Help. Reusable modal component (both Settings and Help share .modal styles and open/close logic).
+// v11 (2026-04-22) — restore hint line under play button (reverting part of v10). Muscle-memory shortcuts (space, arrows, T) are the ones users repeat hundreds of times per session, and on-screen visibility turns first-time users into keyboard-fluent users. Trimmed to only the 3 playback shortcuts — S and ? are labeled on their footer buttons, so no need to repeat. Full keymap + URL docs + About stay in Help modal.
+// v12 (2026-04-22) — add accent toggle. Default is on (first beat louder/higher). When off ("flat" mode) every beat uses the main-beat sound, and the first beat dot loses its mint highlight — visual and audio stay in sync. Pretty URL extends with /flat suffix only when non-default. Useful for grooves that don't land on 1, polyrhythms, or just practicing pulse without a downbeat cue.
+// v13 (2026-04-22) — typography polish: text-wrap: pretty on all prose (Help modal lead/note/about, Settings footer note) to prevent widows/orphans. Falls back to normal wrap in older browsers. Also non-breaking spaces on "4/4", "3/4" etc. in help text so time-signature fractions never break across a line.
+// v14 (2026-04-22) — copy cleanup in About: removed invented marketing aphorism ("your tempo is not a preference; it's a moment"). Kept the factual lines — what it is, who makes it, the no-tracking claim.
+// v15 (2026-04-22) — [ABANDONED] attempted glyph-forward settings with hand-drawn SVG music notation and waveforms. The SVGs read as amateurish at small size and the stacked Space Mono numerals didn't feel any more musical than plain text. Rolled back.
+// v16 (2026-04-22) — proper glyph-forward settings. Time signatures and subdivisions now use Bravura Text (Steinberg's SMuFL music font, loaded from jsDelivr CDN, OFL licensed). Sound buttons use Lucide icons (waves, zap, activity, bell) for subtle envelope differentiation. First-beat buttons use Lucide volume-2 / volume-1 for emphasized-vs-uniform. Segment buttons filled flex:1 in each row, taller to accommodate the larger glyphs. Font-display: swap so text shows instantly even if Bravura hasn't loaded.
+// v17 (2026-04-22) — fix time signature rendering. Bravura's classical serif time-sig digits clashed with the app's modern Inter/Space Mono aesthetic AND rendered too small relative to button size. Replaced with styled Space Mono numerals at 32px with tight 0.82 leading — digits feel like a unified time-signature unit rather than two separate numbers. Subdivisions keep Bravura (single music notes read correctly). Triplet "3" marker repositioned as a proper superscript above the 8th-note glyph with a short bracket line underneath.
+// v18 (2026-04-22) — strip all glyphs from settings buttons. Bravura font dropped (no longer needed), Lucide SVGs removed from Sound and First Beat rows, stacked time signature digits unified into a single inline text. All 15 segment buttons now use plain Space Mono text labels. flex:1 row-filling preserved so each row equally spans the modal width. Waiting on a proper icon/button treatment spec before reintroducing glyphs.
+(function () {
+  'use strict';
+
+  // ---------- state ----------
+  const state = {
+    bpm: 120,
+    sig: '4/4',
+    sub: 'off',
+    sound: 'sine',
+    accent: 'on'
+  };
+
+  const SUB_MAP = { off: 1, '8': 2, '16': 4, '3': 3 };
+  const SIG_BEATS = { '4/4': 4, '3/4': 3, '6/8': 6, '2/4': 2, '5/4': 5 };
+  const ACCENT_VALUES = { on: 1, off: 1 };
+  const STORAGE_KEY = 't0ck-state';
+
+  // ---------- elements ----------
+  const el = {
+    bpm: document.getElementById('bpm'),
+    minus: document.getElementById('minus'),
+    plus: document.getElementById('plus'),
+    tap: document.getElementById('tap'),
+    play: document.getElementById('play'),
+    beats: document.getElementById('beats'),
+    openSettings: document.getElementById('openSettings'),
+    closeSettings: document.getElementById('closeSettings'),
+    modal: document.getElementById('modal'),
+    openHelp: document.getElementById('openHelp'),
+    closeHelp: document.getElementById('closeHelp'),
+    helpModal: document.getElementById('helpModal'),
+    themeToggle: document.getElementById('themeToggle')
+  };
+
+  // ---------- persistence ----------
+  // URL carries full state (bpm/sig/sub/sound) for shareable/bookmarkable links.
+  // localStorage carries only preferences (sig/sub/sound) — BPM is deliberately
+  // excluded because tempo is per-practice-context, not a user preference.
+  //
+  // URL formats supported:
+  //   Pretty (canonical): #90 · #90/3-4 · #90/3-4/8 · #90/3-4/8/wood
+  //     Defaults are omitted so "#120" is a valid tempo-only link.
+  //     "-" substitutes "/" inside the time-signature token to keep the path
+  //     delimiter unambiguous.
+  //   Pretty path: /90, /90/3-4, etc. — works when hosting serves the HTML for
+  //     unknown paths (GitHub Pages: copy index.html → 404.html; Cloudflare
+  //     Pages: add a _redirects file with "/* /index.html 200").
+  //   Legacy: #bpm=90&sig=3/4&sub=off&snd=wood (kept for backward compat).
+  const DEFAULTS = { sig: '4/4', sub: 'off', sound: 'sine', accent: 'on' };
+
+  function encodeHash() {
+    const parts = [String(state.bpm)];
+    const nondefaultSig    = state.sig    !== DEFAULTS.sig;
+    const nondefaultSub    = state.sub    !== DEFAULTS.sub;
+    const nondefaultSound  = state.sound  !== DEFAULTS.sound;
+    const nondefaultAccent = state.accent !== DEFAULTS.accent;
+    // Position-based encoding: earlier tokens are placeholders when later
+    // tokens are non-default. Accent is serialized as "flat" (the word is
+    // the signal — we only write it when it's off).
+    const anyNonDefault = nondefaultSig || nondefaultSub || nondefaultSound || nondefaultAccent;
+    if (anyNonDefault) parts.push(state.sig.replace('/', '-'));
+    if (nondefaultSub || nondefaultSound || nondefaultAccent) parts.push(state.sub);
+    if (nondefaultSound || nondefaultAccent) parts.push(state.sound);
+    if (nondefaultAccent) parts.push('flat');
+    return '#' + parts.join('/');
+  }
+
+  function encodePrefs() {
+    return `sig=${encodeURIComponent(state.sig)}&sub=${state.sub}&snd=${state.sound}&acc=${state.accent}`;
+  }
+
+  function persist() {
+    try { history.replaceState(null, '', encodeHash()); } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEY, encodePrefs()); } catch (e) {}
+  }
+
+  function applyPrettyTokens(tokens) {
+    if (!tokens.length) return;
+    const b = parseInt(tokens[0], 10);
+    if (!isNaN(b)) state.bpm = clampBpm(b);
+    if (tokens[1]) {
+      const sig = tokens[1].replace('-', '/');
+      if (SIG_BEATS[sig] != null) state.sig = sig;
+    }
+    if (tokens[2] && SUB_MAP[tokens[2]] != null) state.sub = tokens[2];
+    if (tokens[3] && SOUNDS[tokens[3]]) state.sound = tokens[3];
+    // Accent token can appear at any position after BPM — check all remaining
+    // tokens for "flat". This keeps links like #90/flat valid even without
+    // explicit sig/sub/sound placeholders.
+    for (let i = 1; i < tokens.length; i++) {
+      if (tokens[i] === 'flat') { state.accent = 'off'; break; }
+    }
+  }
+
+  function applyKeyValueString(raw, allowBpm) {
+    let params;
+    try { params = new URLSearchParams(raw); } catch (e) { return; }
+    if (allowBpm) {
+      const b = parseInt(params.get('bpm'), 10);
+      if (!isNaN(b)) state.bpm = clampBpm(b);
+    }
+    const sig = params.get('sig');
+    if (sig && SIG_BEATS[sig] != null) state.sig = sig;
+    const sub = params.get('sub');
+    if (sub && SUB_MAP[sub] != null) state.sub = sub;
+    const snd = params.get('snd');
+    if (snd && SOUNDS[snd]) state.sound = snd;
+    const acc = params.get('acc');
+    if (acc && ACCENT_VALUES[acc]) state.accent = acc;
+  }
+
+  function loadState() {
+    // 1. Pretty pathname — e.g. /90 or /90/3-4. First segment must be a clean
+    //    integer, otherwise assume the app is mounted at a subpath and skip.
+    let pathRaw = '';
+    try { pathRaw = location.pathname.replace(/^\/+|\/+$/g, ''); } catch (e) {}
+    if (pathRaw) {
+      const first = pathRaw.split('/')[0];
+      const n = parseInt(first, 10);
+      if (!isNaN(n) && String(n) === first) {
+        applyPrettyTokens(pathRaw.split('/').filter(Boolean));
+        // Normalize URL so subsequent updates live on a clean root + hash.
+        try { history.replaceState(null, '', '/' + encodeHash()); } catch (e) {}
+        return;
+      }
+    }
+
+    // 2. Hash — pretty form if no "=", legacy key=value form otherwise.
+    let hashRaw = '';
+    try { hashRaw = location.hash.replace(/^#/, ''); } catch (e) {}
+    if (hashRaw) {
+      if (hashRaw.indexOf('=') !== -1) {
+        applyKeyValueString(hashRaw, true);
+      } else {
+        applyPrettyTokens(hashRaw.split('/').filter(Boolean));
+      }
+      return;
+    }
+
+    // 3. No URL state — load sig/sub/sound prefs from localStorage. BPM stays
+    //    at its default (120).
+    let prefs = '';
+    try { prefs = localStorage.getItem(STORAGE_KEY) || ''; } catch (e) {}
+    // Migration chain: check prior names so prefs carry across renames.
+    if (!prefs) {
+      try { prefs = localStorage.getItem('metr0n0me-state') || ''; } catch (e) {}
+    }
+    if (!prefs) {
+      try { prefs = localStorage.getItem('temp0-state') || ''; } catch (e) {}
+    }
+    if (prefs) applyKeyValueString(prefs, false);
+  }
+
+  // ---------- BPM helpers ----------
+  function clampBpm(n) { return Math.max(30, Math.min(300, n | 0)); }
+
+  function setBpm(n) {
+    state.bpm = clampBpm(n);
+    el.bpm.value = state.bpm;
+    persist();
+  }
+
+  // ---------- sound bank ----------
+  let _noiseBuffer = null;
+  function getNoiseBuffer(ctx) {
+    if (!_noiseBuffer || _noiseBuffer.sampleRate !== ctx.sampleRate) {
+      const size = Math.floor(ctx.sampleRate * 0.05);
+      _noiseBuffer = ctx.createBuffer(1, size, ctx.sampleRate);
+      const data = _noiseBuffer.getChannelData(0);
+      for (let i = 0; i < size; i++) data[i] = Math.random() * 2 - 1;
+    }
+    return _noiseBuffer;
+  }
+
+  const SOUNDS = {
+    sine: {
+      play: function (ctx, time, accent) {
+        const p = {
+          down: { freq: 1600, gain: 0.55 },
+          main: { freq: 800, gain: 0.40 },
+          sub:  { freq: 800, gain: 0.16 }
+        }[accent];
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(p.freq, time);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.002);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+        osc.start(time); osc.stop(time + 0.05);
+      }
+    },
+    wood: {
+      play: function (ctx, time, accent) {
+        const p = {
+          down: { freq: 2000, target: 1000, gain: 0.50 },
+          main: { freq: 1200, target: 600,  gain: 0.38 },
+          sub:  { freq: 1200, target: 600,  gain: 0.14 }
+        }[accent];
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(p.freq, time);
+        osc.frequency.exponentialRampToValueAtTime(p.target, time + 0.012);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.001);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + 0.025);
+        osc.start(time); osc.stop(time + 0.035);
+      }
+    },
+    tick: {
+      play: function (ctx, time, accent) {
+        const p = {
+          down: { freq: 5000, gain: 0.30, dur: 0.020 },
+          main: { freq: 3500, gain: 0.24, dur: 0.018 },
+          sub:  { freq: 3500, gain: 0.09, dur: 0.012 }
+        }[accent];
+        const src = ctx.createBufferSource();
+        src.buffer = getNoiseBuffer(ctx);
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = p.freq;
+        filter.Q.value = 3;
+        const env = ctx.createGain();
+        src.connect(filter); filter.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.001);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + p.dur);
+        src.start(time); src.stop(time + p.dur + 0.01);
+      }
+    },
+    beep: {
+      play: function (ctx, time, accent) {
+        const p = {
+          down: { freq: 1200, gain: 0.40, dur: 0.08 },
+          main: { freq: 880,  gain: 0.30, dur: 0.08 },
+          sub:  { freq: 880,  gain: 0.11, dur: 0.06 }
+        }[accent];
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(p.freq, time);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.003);
+        env.gain.setValueAtTime(p.gain, time + p.dur * 0.35);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + p.dur);
+        osc.start(time); osc.stop(time + p.dur + 0.01);
+      }
+    }
+  };
+
+  // ---------- Web Audio scheduler ----------
+  let audioCtx = null;
+  let isPlaying = false;
+  let nextNoteTime = 0;
+  let currentStep = 0;
+  let schedulerTick = null;
+  const LOOKAHEAD_MS = 25;
+  const SCHEDULE_AHEAD_S = 0.1;
+  const visualQueue = [];
+
+  function ensureCtx() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function stepsPerBeat() { return SUB_MAP[state.sub]; }
+  function stepsPerMeasure() { return SIG_BEATS[state.sig] * stepsPerBeat(); }
+  function secondsPerStep() { return (60 / state.bpm) / stepsPerBeat(); }
+
+  function scheduleClick(step, time) {
+    const spb = stepsPerBeat();
+    const isMainBeat = step % spb === 0;
+    const isDownbeat = step === 0;
+    // Flat mode flattens the downbeat accent — every main beat sounds the same.
+    const accentActive = state.accent === 'on';
+    const accent = (isDownbeat && accentActive) ? 'down' :
+                   isMainBeat ? 'main' : 'sub';
+    const sound = SOUNDS[state.sound] || SOUNDS.sine;
+    sound.play(audioCtx, time, accent);
+    visualQueue.push({ step: step, time: time });
+  }
+
+  function advance() {
+    nextNoteTime += secondsPerStep();
+    currentStep = (currentStep + 1) % stepsPerMeasure();
+  }
+
+  function scheduler() {
+    while (nextNoteTime < audioCtx.currentTime + SCHEDULE_AHEAD_S) {
+      scheduleClick(currentStep, nextNoteTime);
+      advance();
+    }
+  }
+
+  function start() {
+    ensureCtx();
+    isPlaying = true;
+    currentStep = 0;
+    nextNoteTime = audioCtx.currentTime + 0.06;
+    schedulerTick = setInterval(scheduler, LOOKAHEAD_MS);
+    el.play.textContent = 'Stop';
+    el.play.classList.add('playing');
+    requestAnimationFrame(drawLoop);
+  }
+
+  function stop() {
+    isPlaying = false;
+    if (schedulerTick) clearInterval(schedulerTick);
+    schedulerTick = null;
+    visualQueue.length = 0;
+    el.play.textContent = 'Start';
+    el.play.classList.remove('playing');
+    clearBeatDots();
+  }
+
+  function toggle() { isPlaying ? stop() : start(); }
+
+  // ---------- visual pulse ----------
+  function renderBeats() {
+    const beats = SIG_BEATS[state.sig];
+    const accentOn = state.accent === 'on';
+    el.beats.innerHTML = '';
+    for (let i = 0; i < beats; i++) {
+      const d = document.createElement('div');
+      d.className = 'beat-dot' + (i === 0 && accentOn ? ' downbeat' : '');
+      d.dataset.beat = i;
+      el.beats.appendChild(d);
+    }
+  }
+
+  function clearBeatDots() {
+    el.beats.querySelectorAll('.beat-dot').forEach(d => d.classList.remove('active'));
+  }
+
+  function flashBeat(beatIndex) {
+    const dots = el.beats.querySelectorAll('.beat-dot');
+    dots.forEach(d => d.classList.remove('active'));
+    const target = dots[beatIndex];
+    if (target) {
+      target.classList.add('active');
+      setTimeout(() => target.classList.remove('active'), 90);
+    }
+  }
+
+  function drawLoop() {
+    if (!isPlaying) return;
+    const now = audioCtx.currentTime;
+    const spb = stepsPerBeat();
+    while (visualQueue.length && visualQueue[0].time <= now) {
+      const q = visualQueue.shift();
+      if (q.step % spb === 0) {
+        flashBeat(q.step / spb);
+      }
+    }
+    requestAnimationFrame(drawLoop);
+  }
+
+  // ---------- tap tempo ----------
+  let tapTimes = [];
+  function handleTap() {
+    const now = performance.now();
+    if (tapTimes.length && now - tapTimes[tapTimes.length - 1] > 2000) {
+      tapTimes = [];
+    }
+    tapTimes.push(now);
+    if (tapTimes.length > 4) tapTimes.shift();
+    el.tap.classList.add('flash');
+    setTimeout(() => el.tap.classList.remove('flash'), 90);
+    if (tapTimes.length >= 2) {
+      const intervals = [];
+      for (let i = 1; i < tapTimes.length; i++) {
+        intervals.push(tapTimes[i] - tapTimes[i - 1]);
+      }
+      const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      setBpm(Math.round(60000 / avg));
+    }
+  }
+
+  // ---------- segmented controls ----------
+  function updateSegments() {
+    document.querySelectorAll('.segments').forEach(group => {
+      const key = group.dataset.group;
+      const value = state[key];
+      group.querySelectorAll('.seg').forEach(btn => {
+        const match = btn.dataset.value === value;
+        btn.classList.toggle('active', match);
+        btn.setAttribute('aria-checked', match ? 'true' : 'false');
+      });
+    });
+  }
+
+  function handleSegmentClick(e) {
+    const btn = e.target.closest('.seg');
+    if (!btn) return;
+    const group = btn.closest('.segments');
+    const key = group.dataset.group;
+    const value = btn.dataset.value;
+
+    // validate
+    if (key === 'sig' && SIG_BEATS[value] == null) return;
+    if (key === 'sub' && SUB_MAP[value] == null) return;
+    if (key === 'sound' && !SOUNDS[value]) return;
+    if (key === 'accent' && !ACCENT_VALUES[value]) return;
+    if (state[key] === value) return;
+
+    state[key] = value;
+    updateSegments();
+    persist();
+
+    if (key === 'sig') {
+      currentStep = 0;
+      renderBeats();
+    } else if (key === 'sub') {
+      currentStep = 0;
+    } else if (key === 'accent') {
+      // Re-render beat dots so the visual downbeat marker matches the new
+      // audio behavior. No need to reset currentStep — measure position
+      // doesn't shift.
+      renderBeats();
+    } else if (key === 'sound' && !isPlaying) {
+      // Preview a downbeat so the user can audition. Suppressed while running
+      // because the scheduler picks up the new sound on the next scheduled click
+      // and a preview on top would sound like an off-grid extra click.
+      try {
+        ensureCtx();
+        (SOUNDS[value] || SOUNDS.sine).play(audioCtx, audioCtx.currentTime + 0.02, 'down');
+      } catch (err) {}
+    }
+  }
+
+  // ---------- modal ----------
+  // Both Settings and Help use the same modal component. Any modal can be
+  // open at a time; Escape closes whichever is open.
+  let lastFocused = null;
+
+  function openModal(modalEl, focusEl) {
+    lastFocused = document.activeElement;
+    // Close any other open modal first
+    document.querySelectorAll('.modal.open').forEach(m => {
+      if (m !== modalEl) {
+        m.classList.remove('open');
+        m.setAttribute('aria-hidden', 'true');
+      }
+    });
+    modalEl.classList.add('open');
+    modalEl.setAttribute('aria-hidden', 'false');
+    setTimeout(() => { if (focusEl) focusEl.focus(); }, 50);
+  }
+
+  function closeModal(modalEl) {
+    modalEl.classList.remove('open');
+    modalEl.setAttribute('aria-hidden', 'true');
+    if (lastFocused && typeof lastFocused.focus === 'function') {
+      lastFocused.focus();
+    }
+  }
+
+  function openSettings() { openModal(el.modal, el.closeSettings); }
+  function closeSettings() { closeModal(el.modal); }
+  function openHelp() { openModal(el.helpModal, el.closeHelp); }
+  function closeHelp() { closeModal(el.helpModal); }
+
+  function anyModalOpen() {
+    return el.modal.classList.contains('open') ||
+           el.helpModal.classList.contains('open');
+  }
+
+  function closeAnyModal() {
+    if (el.modal.classList.contains('open')) closeModal(el.modal);
+    if (el.helpModal.classList.contains('open')) closeModal(el.helpModal);
+  }
+
+  // ---------- theme ----------
+  // Initial state follows the OS preference. Toggle flips for this session
+  // only — nothing persists. On reload we match OS again. If the OS prefers
+  // changes mid-session AND the user hasn't manually toggled, we follow.
+  const THEME_COLORS = {
+    light: { bg: '#F9F9F9', ink: '#034D32' },
+    dark:  { bg: '#0a1612', ink: '#E4F3EE' }
+  };
+  let themeUserOverride = false;
+
+  function applyTheme(mode) {
+    const c = THEME_COLORS[mode] || THEME_COLORS.light;
+    document.documentElement.setAttribute('data-theme', mode);
+    // Per the Claude-preview dark-mode rule: set bg/color inline on BOTH
+    // documentElement and body, not just via CSS variables.
+    document.documentElement.style.background = c.bg;
+    document.documentElement.style.color = c.ink;
+    document.body.style.background = c.bg;
+    document.body.style.color = c.ink;
+    // Button shows what you'll switch TO, not the current state.
+    el.themeToggle.textContent = mode === 'dark' ? '☀' : '☾';
+    el.themeToggle.setAttribute(
+      'aria-label',
+      mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+    );
+  }
+
+  function toggleTheme() {
+    themeUserOverride = true;
+    const current = document.documentElement.getAttribute('data-theme');
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+  }
+
+  function initTheme() {
+    const mql = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+    applyTheme(mql && mql.matches ? 'dark' : 'light');
+    if (mql && mql.addEventListener) {
+      mql.addEventListener('change', (e) => {
+        if (!themeUserOverride) applyTheme(e.matches ? 'dark' : 'light');
+      });
+    }
+  }
+
+  // ---------- events ----------
+  el.plus.addEventListener('click', () => setBpm(state.bpm + 1));
+  el.minus.addEventListener('click', () => setBpm(state.bpm - 1));
+
+  el.bpm.addEventListener('input', (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (!isNaN(v)) {
+      state.bpm = clampBpm(v);
+      persist();
+    }
+  });
+  el.bpm.addEventListener('blur', () => { el.bpm.value = state.bpm; });
+  el.bpm.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') el.bpm.blur();
+  });
+
+  el.tap.addEventListener('click', handleTap);
+  el.play.addEventListener('click', toggle);
+
+  el.openSettings.addEventListener('click', openSettings);
+  el.closeSettings.addEventListener('click', closeSettings);
+  el.openHelp.addEventListener('click', openHelp);
+  el.closeHelp.addEventListener('click', closeHelp);
+  el.themeToggle.addEventListener('click', toggleTheme);
+
+  document.querySelectorAll('.segments').forEach(group => {
+    group.addEventListener('click', handleSegmentClick);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    // Escape closes whichever modal is open
+    if (e.key === 'Escape' && anyModalOpen()) {
+      e.preventDefault();
+      closeAnyModal();
+      return;
+    }
+    // Don't hijack keys while typing in the BPM input
+    if (e.target === el.bpm) return;
+    // Don't hijack keys while a modal is open (segment buttons need focus/tab)
+    if (anyModalOpen()) return;
+    if (e.code === 'Space') { e.preventDefault(); toggle(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setBpm(state.bpm + 1); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setBpm(state.bpm - 1); }
+    else if (e.key === 't' || e.key === 'T') { handleTap(); }
+    else if (e.key === 's' || e.key === 'S') { e.preventDefault(); openSettings(); }
+    else if (e.key === '?' || e.key === '/') { e.preventDefault(); openHelp(); }
+  });
+
+  window.addEventListener('hashchange', () => {
+    loadState();
+    el.bpm.value = state.bpm;
+    renderBeats();
+    updateSegments();
+  });
+
+  // ---------- init ----------
+  initTheme();
+  loadState();
+  el.bpm.value = state.bpm;
+  renderBeats();
+  updateSegments();
+  persist();
+})();
+</script>
+</body>
+</html>
