@@ -666,7 +666,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v29 · 20260423</span>
+    <span class="version">v30 · 20260423</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -697,6 +697,15 @@
 
   <div class="hint">
     <kbd>space</kbd> play/stop · <kbd>↑</kbd><kbd>↓</kbd> BPM · <kbd>T</kbd> tap
+  </div>
+
+  <!-- v30 diagnostic panel. Hidden unless URL has ?debug. Includes a test
+       button that plays an AUDIBLE click (not silent) — lets us distinguish
+       "audio is totally broken on this device" from "only the metronome
+       path is broken" from "only first-session-promotion is broken." -->
+  <div id="debugPanel" style="display:none;position:fixed;top:8px;left:8px;right:8px;max-width:560px;margin:0 auto;background:rgba(3,77,50,0.92);color:#F9F9F9;font-family:'Space Mono',monospace;font-size:10px;line-height:1.5;padding:10px 12px;border-radius:8px;z-index:200;">
+    <pre id="debugText" style="margin:0;white-space:pre-wrap;word-break:break-all;"></pre>
+    <button id="audibleTest" style="margin-top:8px;background:#F9F9F9;color:#034D32;border:none;border-radius:6px;padding:8px 12px;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;cursor:pointer;">PLAY AUDIBLE TEST CLICK</button>
   </div>
 </main>
 
@@ -837,6 +846,7 @@
 // v27 (2026-04-23) — fix debug access URL. v26 used #debug as the gate, but the app's URL parser interprets everything after # as BPM/state and rewrites invalid values to defaults — so /#debug was silently redirecting to /#120. Debug gate is now ?debug (query string), which the parser ignores. Access via t0ck.app/?debug or t0ck.app/?debug#120 for debug while keeping a specific BPM.
 // v28 (2026-04-23) — better diagnostics. v27's debug panel showed silentAudio play() as "(not attempted)" even though other signals showed it HAD been called (paused:false, readyState:1). Root cause: playResult was only assigned inside the promise resolve/reject handlers, so a pending promise left it at the initial string. Now playResult is set to "called-pending" synchronously on the .play() invocation, then upgraded to "resolved" or "rejected" when the promise settles. Also bumped the hardcoded version string in the panel header so we stop second-guessing which version is live.
 // v29 (2026-04-23) — real iOS audio fix. Debug panel in v28 confirmed the HTML-audio silent-WAV trick fails on current iOS Safari (promise hangs at called-pending, currentTime stays at 0, session never promotes). Replaced with Web-Audio-native approach: on first user gesture we play a real AudioBuffer of silence through an AudioBufferSourceNode at gain 0. That's a genuine Web Audio playback event and iOS promotes the session correctly. Dropped the SILENT_WAV data URI, dropped the HTMLAudioElement, dropped the promise-chasing. Also removed debug panel — purpose served, and production code shouldn't ship with diagnostic overlays.
+// v30 (2026-04-23) — diagnostic build on top of v29. v29's Web Audio silent-buffer approach also isn't producing sound on iOS 18 Safari. Re-added debug panel (gated behind ?debug) with new instrumentation specific to v29's path: AudioContext baseLatency, outputLatency, audioWorklet state, whether the silent buffer src actually fired an 'ended' event, and a test button that plays an audible click on demand so we can tell "no audio at all" from "metronome-path specifically broken."
 (function () {
   'use strict';
 
@@ -1118,6 +1128,21 @@
   // adds no measurable latency.
   let sessionPromoted = false;
 
+  // v30 diagnostic state — only used when ?debug is in the URL
+  const diag = {
+    ctxState: '(not created)',
+    sampleRate: 0,
+    baseLatency: 0,
+    outputLatency: 0,
+    silentStartCalled: false,
+    silentStartedAt: 0,
+    silentEndedAt: 0,
+    silentError: '',
+    scheduleCount: 0,
+    lastScheduledAt: 0,
+    audibleTestAt: 0,
+  };
+
   function promoteAudioSession(ctx) {
     if (sessionPromoted || !ctx) return;
     try {
@@ -1134,11 +1159,13 @@
       gain.gain.value = 0;
       src.connect(gain);
       gain.connect(ctx.destination);
+      src.onended = () => { diag.silentEndedAt = performance.now(); };
       src.start(0);
+      diag.silentStartCalled = true;
+      diag.silentStartedAt = performance.now();
       sessionPromoted = true;
     } catch (e) {
-      // Non-fatal. On platforms that don't need this promotion (desktop,
-      // Android, older iOS), the fallback is "audio just works."
+      diag.silentError = String(e && e.name || e);
     }
   }
 
@@ -1168,6 +1195,8 @@
     const sound = SOUNDS[state.sound] || SOUNDS.sine;
     sound.play(audioCtx, time, accent);
     visualQueue.push({ step: step, time: time });
+    diag.scheduleCount++;
+    diag.lastScheduledAt = performance.now();
   }
 
   function advance() {
@@ -1465,6 +1494,80 @@
   renderBeats();
   updateSegments();
   persist();
+
+  // v30 diagnostic panel. Only activates when URL has ?debug.
+  (function setupDebug() {
+    const debugOn = /debug/i.test(location.search) || /debug/i.test(location.hash);
+    const panel = document.getElementById('debugPanel');
+    const text = document.getElementById('debugText');
+    const btn = document.getElementById('audibleTest');
+    if (!debugOn || !panel) return;
+    panel.style.display = 'block';
+
+    const ua = navigator.userAgent;
+    const iosLike = /iPhone|iPad|iPod/.test(ua) ||
+                    (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform || ''));
+
+    // Audible test: forcibly create an AudioContext if needed, play a
+    // short 440Hz sine wave at real volume. If THIS doesn't play, audio
+    // output on the device is broken at the Web Audio level entirely.
+    if (btn) {
+      btn.addEventListener('click', () => {
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (!audioCtx) audioCtx = new AC();
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+          promoteAudioSession(audioCtx);
+          const osc = audioCtx.createOscillator();
+          const g = audioCtx.createGain();
+          osc.frequency.value = 880;
+          osc.type = 'sine';
+          g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+          g.gain.exponentialRampToValueAtTime(0.5, audioCtx.currentTime + 0.005);
+          g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.15);
+          osc.connect(g);
+          g.connect(audioCtx.destination);
+          osc.start(audioCtx.currentTime);
+          osc.stop(audioCtx.currentTime + 0.2);
+          diag.audibleTestAt = performance.now();
+        } catch (e) {
+          diag.silentError = 'audible-test: ' + String(e && e.name || e);
+        }
+      });
+    }
+
+    function fmt(t) {
+      if (!t) return '(never)';
+      return Math.round(performance.now() - t) + 'ms ago';
+    }
+
+    function render() {
+      if (audioCtx) {
+        diag.ctxState = audioCtx.state;
+        diag.sampleRate = audioCtx.sampleRate;
+        diag.baseLatency = audioCtx.baseLatency || 0;
+        diag.outputLatency = audioCtx.outputLatency || 0;
+      }
+      text.textContent =
+        'DEBUG · v30 · ' + (iosLike ? 'iOS-like' : 'other') + '\n' +
+        '------\n' +
+        'AudioContext state:  ' + diag.ctxState + '\n' +
+        'sample rate:         ' + diag.sampleRate + '\n' +
+        'baseLatency:         ' + (diag.baseLatency * 1000).toFixed(2) + 'ms\n' +
+        'outputLatency:       ' + (diag.outputLatency * 1000).toFixed(2) + 'ms\n' +
+        '------\n' +
+        'silent promote:      ' + (diag.silentStartCalled ? 'started' : 'not-called') + '\n' +
+        '  started:           ' + fmt(diag.silentStartedAt) + '\n' +
+        '  ended:             ' + fmt(diag.silentEndedAt) + '\n' +
+        '  error:             ' + (diag.silentError || '(none)') + '\n' +
+        '------\n' +
+        'clicks scheduled:    ' + diag.scheduleCount + '\n' +
+        'last click:          ' + fmt(diag.lastScheduledAt) + '\n' +
+        'audible test:        ' + fmt(diag.audibleTestAt);
+      requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
+  })();
 })();
 </script>
 </body>
