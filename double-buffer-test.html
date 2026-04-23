@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>double-buffer loop test</title>
+<title>double-buffer loop test v2</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { min-height: 100vh; min-height: 100dvh; background: #F9F9F9; color: #034D32; font-family: 'Inter', system-ui, sans-serif; }
@@ -16,20 +16,22 @@
   .note { font-size: 11px; color: #5a7868; max-width: 320px; text-align: center; }
   label { font-size: 12px; color: #5a7868; display: flex; align-items: center; gap: 8px; }
   input[type="number"] { width: 70px; padding: 6px 8px; border: 1px solid #C0DDD4; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  .v2-note { background: rgba(0,189,120,0.12); border: 1px solid #00BD78; border-radius: 8px; padding: 8px 12px; font-size: 11px; color: #034D32; max-width: 320px; text-align: center; }
 </style>
 </head>
 <body>
-  <h1>double-buffer loop · 120 BPM · 4/4</h1>
-  <div class="subtitle">Two audio elements alternate playback. Handoff timing configurable below — we need to find the sweet spot where beat 1 lands tight after beat 4.</div>
+  <h1>double-buffer v2 · 120 BPM · 4/4</h1>
+  <div class="subtitle">Same as v1 but both buffers are primed during the Start tap to warm them with iOS's audio system. First handoff should now be smooth.</div>
+  <div class="v2-note">v2 change: both audio elements are play-then-paused during the Start gesture. Both "wake up" together, so B's first real play is instant, not jittered.</div>
   <label>Handoff offset: <input type="number" id="offset" value="-10" step="5" min="-200" max="200"> ms</label>
-  <div class="note">Negative = start next buffer slightly before current ends (overlap). Positive = gap. Target: tightest 4→1 transition.</div>
+  <div class="note">Negative = start next buffer slightly before current ends (overlap). Target: tightest 4→1 transition.</div>
   <button id="toggle">START</button>
   <div class="stats" id="stats">ready</div>
   <audio id="a" src="double-buffer-test.wav" preload="auto" playsinline webkit-playsinline></audio>
   <audio id="b" src="double-buffer-test.wav" preload="auto" playsinline webkit-playsinline></audio>
 <script>
 (function(){
-  const MEASURE_MS = 2000; // 4 beats at 120 BPM
+  const MEASURE_MS = 2000;
   const a = document.getElementById('a');
   const b = document.getElementById('b');
   const btn = document.getElementById('toggle');
@@ -38,11 +40,12 @@
 
   let playing = false;
   let measureCount = 0;
-  let nextStartAt = 0; // performance.now when the next measure should start
-  let current = 'a';   // which element is the "scheduled next" one
+  let nextStartAt = 0;
+  let current = 'a';
   let loadedA = false, loadedB = false;
   let scheduleTimer = 0;
   let jitterSamples = [];
+  let primed = false;
 
   a.addEventListener('loadeddata', () => { loadedA = true; updateStats(); });
   b.addEventListener('loadeddata', () => { loadedB = true; updateStats(); });
@@ -53,10 +56,22 @@
     const jitterAvg = jitterSamples.length ? (jitterSamples.reduce((s,v)=>s+v,0) / jitterSamples.length).toFixed(1) : '-';
     stats.textContent =
       'status:    ' + (playing ? 'playing' : 'idle') + ' (' + loaded + ')\n' +
+      'primed:    ' + primed + '\n' +
       'measure:   ' + measureCount + '\n' +
       'handoff:   ' + offsetInput.value + 'ms offset\n' +
       'jitter avg: ' + jitterAvg + 'ms\n' +
       'jitter max: ' + jitterMax + 'ms';
+  }
+
+  // Prime both audio elements during a user gesture: play, immediately pause,
+  // reset currentTime. This registers them with iOS's audio system so
+  // subsequent scheduler-driven play() calls respond instantly. Both elements
+  // are warmed simultaneously inside the same gesture.
+  function primeAudio() {
+    return Promise.all([
+      (a.play() || Promise.resolve()).then(() => { a.pause(); a.currentTime = 0; }).catch(() => {}),
+      (b.play() || Promise.resolve()).then(() => { b.pause(); b.currentTime = 0; }).catch(() => {})
+    ]);
   }
 
   function scheduleNext() {
@@ -88,16 +103,22 @@
     }, delay);
   }
 
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     if (!playing) {
       playing = true;
       btn.textContent = 'STOP';
-      measureCount = 1;
+      measureCount = 0;
       jitterSamples = [];
-      // Start the first one immediately; schedule subsequent handoffs from here.
+
+      // Prime both elements FIRST, still inside the gesture.
+      await primeAudio();
+      primed = true;
+
+      // Now start A for real. Schedule B for 2s from now.
+      measureCount = 1;
       const startTime = performance.now();
       nextStartAt = startTime + MEASURE_MS;
-      current = 'b'; // after the first A-play, next will be B
+      current = 'b';
       try {
         a.currentTime = 0;
         const p = a.play();
@@ -114,6 +135,7 @@
       try { a.currentTime = 0; b.currentTime = 0; } catch(e){}
       btn.textContent = 'START';
       measureCount = 0;
+      primed = false;
       updateStats();
     }
   });
