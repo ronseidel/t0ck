@@ -496,12 +496,14 @@
        viewports. Adding padding-bottom makes the body taller, which
        shrinks the auto margins, which pulls the visible content UP.
        Half the padding-bottom translates to the visual nudge amount
-       (64px padding → ~32px upward shift — the optical correction).
+       (96px padding → ~48px upward shift). Past the standard optical-
+       centering range, but the body is small relative to a tall
+       viewport — small blocks need stronger biases to feel centered.
        On short viewports where auto margins are already 0, padding-bottom
        just reads as trailing whitespace and the layout stays natural. */
     margin-top: auto;
     margin-bottom: auto;
-    padding-bottom: 64px;
+    padding-bottom: 96px;
     width: 100%;
   }
 
@@ -664,7 +666,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v23 · 20260422</span>
+    <span class="version">v24 · 20260422</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -829,6 +831,7 @@
 // v21 (2026-04-22) — modal content vertical centering on large screens. Previously main screen had its content vertically centered but Settings/Help stacked content from the top, causing visual "jump" when opening a modal on a tall viewport. Now .modal-body uses margin: auto 0 so the body floats in the middle space between the pinned header and the pinned footer. Self-correcting: on shorter viewports where content exceeds available space, auto margins collapse to zero and the layout reverts to natural top-down stacking. Also added a min-height guard so body content on very short viewports never overflows the header.
 // v22 (2026-04-22) — optical centering correction. True geometric center reads as slightly bottom-heavy on tall viewports because eyes perceive "balanced" as weighted slightly above mid. Added a 32px fixed bottom margin to .modal-body so flexbox distributes more space above than below, nudging content up to where it feels centered. Only applies when the viewport is tall enough that auto margins are distributing real space; on short viewports the fixed margin is absorbed by the overflow handling.
 // v23 (2026-04-22) — bump optical correction from 48px to 64px padding-bottom (24px visual shift → 32px). The 24px nudge was real but subtle; 32px lands more confidently at the top end of the optical-centering range.
+// v24 (2026-04-22) — bump optical correction again, 64px → 96px (32px shift → 48px). Past the standard optical-centering range but the modal body is small relative to a tall desktop viewport, and small blocks need stronger biases to feel centered. Previous 32px still read as bottom-heavy.
 (function () {
   'use strict';
 
