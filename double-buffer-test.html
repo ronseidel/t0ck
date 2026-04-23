@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>double-buffer loop test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { min-height: 100vh; min-height: 100dvh; background: #F9F9F9; color: #034D32; font-family: 'Inter', system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; }
+  h1 { font-family: ui-monospace, Menlo, monospace; font-size: 18px; letter-spacing: -0.02em; text-align: center; }
+  .subtitle { font-size: 14px; color: #5a7868; text-align: center; max-width: 320px; line-height: 1.5; }
+  button { background: #028454; color: #F9F9F9; border: none; border-radius: 12px; padding: 18px 32px; font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; min-width: 220px; }
+  button:active { transform: scale(0.97); }
+  .stats { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #5a7868; text-align: left; width: 100%; max-width: 320px; white-space: pre-wrap; background: rgba(2,132,84,0.05); border: 1px solid #C0DDD4; border-radius: 8px; padding: 10px 12px; }
+  .note { font-size: 11px; color: #5a7868; max-width: 320px; text-align: center; }
+  label { font-size: 12px; color: #5a7868; display: flex; align-items: center; gap: 8px; }
+  input[type="number"] { width: 70px; padding: 6px 8px; border: 1px solid #C0DDD4; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>double-buffer loop · 120 BPM · 4/4</h1>
+  <div class="subtitle">Two audio elements alternate playback. Handoff timing configurable below — we need to find the sweet spot where beat 1 lands tight after beat 4.</div>
+  <label>Handoff offset: <input type="number" id="offset" value="-10" step="5" min="-200" max="200"> ms</label>
+  <div class="note">Negative = start next buffer slightly before current ends (overlap). Positive = gap. Target: tightest 4→1 transition.</div>
+  <button id="toggle">START</button>
+  <div class="stats" id="stats">ready</div>
+  <audio id="a" src="double-buffer-test.wav" preload="auto" playsinline webkit-playsinline></audio>
+  <audio id="b" src="double-buffer-test.wav" preload="auto" playsinline webkit-playsinline></audio>
+<script>
+(function(){
+  const MEASURE_MS = 2000; // 4 beats at 120 BPM
+  const a = document.getElementById('a');
+  const b = document.getElementById('b');
+  const btn = document.getElementById('toggle');
+  const stats = document.getElementById('stats');
+  const offsetInput = document.getElementById('offset');
+
+  let playing = false;
+  let measureCount = 0;
+  let nextStartAt = 0; // performance.now when the next measure should start
+  let current = 'a';   // which element is the "scheduled next" one
+  let loadedA = false, loadedB = false;
+  let scheduleTimer = 0;
+  let jitterSamples = [];
+
+  a.addEventListener('loadeddata', () => { loadedA = true; updateStats(); });
+  b.addEventListener('loadeddata', () => { loadedB = true; updateStats(); });
+
+  function updateStats() {
+    const loaded = loadedA && loadedB ? 'loaded' : 'loading...';
+    const jitterMax = jitterSamples.length ? Math.max(...jitterSamples).toFixed(1) : '-';
+    const jitterAvg = jitterSamples.length ? (jitterSamples.reduce((s,v)=>s+v,0) / jitterSamples.length).toFixed(1) : '-';
+    stats.textContent =
+      'status:    ' + (playing ? 'playing' : 'idle') + ' (' + loaded + ')\n' +
+      'measure:   ' + measureCount + '\n' +
+      'handoff:   ' + offsetInput.value + 'ms offset\n' +
+      'jitter avg: ' + jitterAvg + 'ms\n' +
+      'jitter max: ' + jitterMax + 'ms';
+  }
+
+  function scheduleNext() {
+    if (!playing) return;
+    const now = performance.now();
+    const offset = parseInt(offsetInput.value, 10) || 0;
+    const fireAt = nextStartAt + offset;
+    const delay = Math.max(0, fireAt - now);
+
+    scheduleTimer = setTimeout(() => {
+      if (!playing) return;
+      const actualFire = performance.now();
+      const scheduleError = actualFire - fireAt;
+      jitterSamples.push(Math.abs(scheduleError));
+      if (jitterSamples.length > 20) jitterSamples.shift();
+
+      const el = (current === 'a') ? a : b;
+      try {
+        el.currentTime = 0;
+        const p = el.play();
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) {}
+
+      current = (current === 'a') ? 'b' : 'a';
+      measureCount++;
+      nextStartAt += MEASURE_MS;
+      updateStats();
+      scheduleNext();
+    }, delay);
+  }
+
+  btn.addEventListener('click', () => {
+    if (!playing) {
+      playing = true;
+      btn.textContent = 'STOP';
+      measureCount = 1;
+      jitterSamples = [];
+      // Start the first one immediately; schedule subsequent handoffs from here.
+      const startTime = performance.now();
+      nextStartAt = startTime + MEASURE_MS;
+      current = 'b'; // after the first A-play, next will be B
+      try {
+        a.currentTime = 0;
+        const p = a.play();
+        if (p && p.catch) p.catch((e) => {
+          stats.textContent = 'play err: ' + e.name + ' ' + e.message;
+        });
+      } catch (e) {}
+      updateStats();
+      scheduleNext();
+    } else {
+      playing = false;
+      clearTimeout(scheduleTimer);
+      a.pause(); b.pause();
+      try { a.currentTime = 0; b.currentTime = 0; } catch(e){}
+      btn.textContent = 'START';
+      measureCount = 0;
+      updateStats();
+    }
+  });
+
+  updateStats();
+})();
+</script>
+</body>
+</html>
