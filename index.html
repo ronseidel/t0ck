@@ -118,7 +118,11 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background: var(--bg);
     color: var(--ink);
+    /* Fallback for older browsers */
     min-height: 100vh;
+    /* Dynamic viewport: adapts to browser chrome (toolbar) on iOS/Android
+       so the footer buttons never hide under the bottom bar. */
+    min-height: 100dvh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -127,9 +131,15 @@
     display: flex;
     flex-direction: column;
     padding: 24px;
+    /* Respect iOS safe area (home indicator bar) so footer buttons stay
+       above it on notched/bezel-less phones. Uses max() so desktop/other
+       platforms keep the standard 24px and mobile gets whatever the
+       system reports, whichever is bigger. */
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
     max-width: 560px;
     margin: 0 auto;
     min-height: 100vh;
+    min-height: 100dvh;
   }
 
   header {
@@ -637,7 +647,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v18 · 20260422</span>
+    <span class="version">v19 · 20260422</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -797,6 +807,7 @@
 // v16 (2026-04-22) — proper glyph-forward settings. Time signatures and subdivisions now use Bravura Text (Steinberg's SMuFL music font, loaded from jsDelivr CDN, OFL licensed). Sound buttons use Lucide icons (waves, zap, activity, bell) for subtle envelope differentiation. First-beat buttons use Lucide volume-2 / volume-1 for emphasized-vs-uniform. Segment buttons filled flex:1 in each row, taller to accommodate the larger glyphs. Font-display: swap so text shows instantly even if Bravura hasn't loaded.
 // v17 (2026-04-22) — fix time signature rendering. Bravura's classical serif time-sig digits clashed with the app's modern Inter/Space Mono aesthetic AND rendered too small relative to button size. Replaced with styled Space Mono numerals at 32px with tight 0.82 leading — digits feel like a unified time-signature unit rather than two separate numbers. Subdivisions keep Bravura (single music notes read correctly). Triplet "3" marker repositioned as a proper superscript above the 8th-note glyph with a short bracket line underneath.
 // v18 (2026-04-22) — strip all glyphs from settings buttons. Bravura font dropped (no longer needed), Lucide SVGs removed from Sound and First Beat rows, stacked time signature digits unified into a single inline text. All 15 segment buttons now use plain Space Mono text labels. flex:1 row-filling preserved so each row equally spans the modal width. Waiting on a proper icon/button treatment spec before reintroducing glyphs.
+// v19 (2026-04-22) — mobile viewport fix. Changed html/body min-height from 100vh to 100dvh (dynamic viewport height). Fixes iOS Safari (Settings/Help footer pushed behind bottom toolbar) and iOS Chrome (footer completely off-screen). 100vh on iOS calculates against the toolbar-collapsed viewport, so any content that fills the viewport gets cut off when the toolbar is visible. 100dvh adapts to the actual available space. Fallback to 100vh for older browsers that don't support dvh (pre-2022 Safari / pre-Chrome 108).
 (function () {
   'use strict';
 
