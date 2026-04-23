@@ -420,7 +420,12 @@
     display: flex;
     flex-direction: column;
     transform: translateY(100%);
-    transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+    /* Transition transform AND visibility. visibility has a delay so on
+       close, the modal slides away first (260ms), then becomes hidden.
+       On open, the .open class overrides with delay: 0 so visibility
+       flips immediately and the slide-up animation plays while visible. */
+    transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1),
+                visibility 0s linear 260ms;
     overflow-y: auto;
     visibility: hidden;
   }
@@ -428,6 +433,8 @@
   .modal.open {
     transform: translateY(0);
     visibility: visible;
+    transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1),
+                visibility 0s linear 0s;
   }
 
   .modal-inner {
@@ -484,7 +491,13 @@
     display: flex;
     flex-direction: column;
     gap: 28px;
-    flex: 1;
+    /* Auto margins in a flex column push equal space above/below so the
+       body floats centered between the pinned header and anything after
+       it (footer note, etc.). On short viewports where content exceeds
+       available space, auto margins collapse to 0 and the body reverts
+       to natural top-down stacking — no overflow. */
+    margin: auto 0;
+    width: 100%;
   }
 
   .group-label {
@@ -540,7 +553,6 @@
     color: var(--muted);
     text-align: center;
     padding-top: 24px;
-    margin-top: auto;
     letter-spacing: 0.03em;
   }
 
@@ -647,7 +659,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v19 · 20260422</span>
+    <span class="version">v21 · 20260422</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -808,6 +820,8 @@
 // v17 (2026-04-22) — fix time signature rendering. Bravura's classical serif time-sig digits clashed with the app's modern Inter/Space Mono aesthetic AND rendered too small relative to button size. Replaced with styled Space Mono numerals at 32px with tight 0.82 leading — digits feel like a unified time-signature unit rather than two separate numbers. Subdivisions keep Bravura (single music notes read correctly). Triplet "3" marker repositioned as a proper superscript above the 8th-note glyph with a short bracket line underneath.
 // v18 (2026-04-22) — strip all glyphs from settings buttons. Bravura font dropped (no longer needed), Lucide SVGs removed from Sound and First Beat rows, stacked time signature digits unified into a single inline text. All 15 segment buttons now use plain Space Mono text labels. flex:1 row-filling preserved so each row equally spans the modal width. Waiting on a proper icon/button treatment spec before reintroducing glyphs.
 // v19 (2026-04-22) — mobile viewport fix. Changed html/body min-height from 100vh to 100dvh (dynamic viewport height). Fixes iOS Safari (Settings/Help footer pushed behind bottom toolbar) and iOS Chrome (footer completely off-screen). 100vh on iOS calculates against the toolbar-collapsed viewport, so any content that fills the viewport gets cut off when the toolbar is visible. 100dvh adapts to the actual available space. Fallback to 100vh for older browsers that don't support dvh (pre-2022 Safari / pre-Chrome 108).
+// v20 (2026-04-22) — modal close animation symmetry. Previously modal slid up on open but snapped away instantly on close because visibility: hidden flipped immediately while transform was still animating. Now visibility transition is delayed on close (waits for slide-down to finish) but immediate on open. The open and close now mirror each other — both are a 260ms slide using the same easing curve. Felt jarring before; feels intentional now.
+// v21 (2026-04-22) — modal content vertical centering on large screens. Previously main screen had its content vertically centered but Settings/Help stacked content from the top, causing visual "jump" when opening a modal on a tall viewport. Now .modal-body uses margin: auto 0 so the body floats in the middle space between the pinned header and the pinned footer. Self-correcting: on shorter viewports where content exceeds available space, auto margins collapse to zero and the layout reverts to natural top-down stacking. Also added a min-height guard so body content on very short viewports never overflows the header.
 (function () {
   'use strict';
 
