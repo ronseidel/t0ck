@@ -666,7 +666,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v24 · 20260422</span>
+    <span class="version">v25 · 20260422</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -832,6 +832,7 @@
 // v22 (2026-04-22) — optical centering correction. True geometric center reads as slightly bottom-heavy on tall viewports because eyes perceive "balanced" as weighted slightly above mid. Added a 32px fixed bottom margin to .modal-body so flexbox distributes more space above than below, nudging content up to where it feels centered. Only applies when the viewport is tall enough that auto margins are distributing real space; on short viewports the fixed margin is absorbed by the overflow handling.
 // v23 (2026-04-22) — bump optical correction from 48px to 64px padding-bottom (24px visual shift → 32px). The 24px nudge was real but subtle; 32px lands more confidently at the top end of the optical-centering range.
 // v24 (2026-04-22) — bump optical correction again, 64px → 96px (32px shift → 48px). Past the standard optical-centering range but the modal body is small relative to a tall desktop viewport, and small blocks need stronger biases to feel centered. Previous 32px still read as bottom-heavy.
+// v25 (2026-04-22) — iOS silent-mode audio fix. By default iOS puts all browser Web Audio into the "ringer" audio session category, which means it's muted whenever the phone is in silent mode. Since metronomes are playback content (not alerts), this is the wrong default. Fix: prime a short silent HTMLAudioElement on first user gesture before starting Web Audio. Playing HTML audio flips the iOS audio session to "playback" category, which ignores silent mode. Matches what music apps like Spotify do. Desktop and non-iOS mobile are unaffected since they don't have this ringer/playback distinction.
 (function () {
   'use strict';
 
@@ -1096,7 +1097,42 @@
   const SCHEDULE_AHEAD_S = 0.1;
   const visualQueue = [];
 
+  // iOS silent-mode workaround. When the phone is in silent mode, iOS mutes
+  // Web Audio by default because browsers use the "ringer" audio session
+  // category. Music apps (Spotify, YouTube) use the "playback" category,
+  // which ignores the silent switch. There's no direct API to set this
+  // category from web code, but playing a silent HTMLAudioElement within
+  // a user gesture does the trick: iOS infers we're playing media content
+  // and promotes the session to playback. The audio element is kept
+  // around (looping silently) so the session stays promoted.
+  //
+  // Data URI is a valid minimal WAV: 1 channel, 8kHz, 8-bit PCM, with 8
+  // samples of silence (1ms). Some browsers reject zero-length data
+  // chunks, so a tiny nonzero payload is safer. ~70 bytes base64.
+  let silentAudio = null;
+  let sessionPromoted = false;
+  const SILENT_WAV = 'data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQgAAACAgICAgICAgA==';
+
+  function promoteAudioSession() {
+    if (sessionPromoted) return;
+    try {
+      if (!silentAudio) {
+        silentAudio = new Audio(SILENT_WAV);
+        silentAudio.loop = true;
+        silentAudio.volume = 0;
+        silentAudio.setAttribute('playsinline', '');
+        silentAudio.setAttribute('webkit-playsinline', '');
+      }
+      const p = silentAudio.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+      sessionPromoted = true;
+    } catch (e) {
+      // Non-fatal — audio will still work on platforms that don't need this.
+    }
+  }
+
   function ensureCtx() {
+    promoteAudioSession();
     if (!audioCtx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       audioCtx = new AC();
