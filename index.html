@@ -666,7 +666,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v25 · 20260422</span>
+    <span class="version">v26 · 20260422</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -698,6 +698,13 @@
   <div class="hint">
     <kbd>space</kbd> play/stop · <kbd>↑</kbd><kbd>↓</kbd> BPM · <kbd>T</kbd> tap
   </div>
+
+  <!-- Diagnostic panel. Hidden by default; visible when URL contains "debug"
+       in the hash (e.g. t0ck.app/#debug or t0ck.app/120#debug). Used to
+       troubleshoot audio issues on real devices without needing to install
+       Safari devtools. Safe to leave in — zero bytes of runtime cost when
+       hidden, because the update loop early-returns. -->
+  <pre id="debugPanel" style="display:none;position:fixed;top:8px;left:8px;right:8px;max-width:560px;margin:0 auto;background:rgba(3,77,50,0.92);color:#F9F9F9;font-family:'Space Mono',monospace;font-size:10px;line-height:1.5;padding:10px 12px;border-radius:8px;z-index:200;white-space:pre-wrap;word-break:break-all;pointer-events:none;"></pre>
 </main>
 
 <footer>
@@ -833,6 +840,7 @@
 // v23 (2026-04-22) — bump optical correction from 48px to 64px padding-bottom (24px visual shift → 32px). The 24px nudge was real but subtle; 32px lands more confidently at the top end of the optical-centering range.
 // v24 (2026-04-22) — bump optical correction again, 64px → 96px (32px shift → 48px). Past the standard optical-centering range but the modal body is small relative to a tall desktop viewport, and small blocks need stronger biases to feel centered. Previous 32px still read as bottom-heavy.
 // v25 (2026-04-22) — iOS silent-mode audio fix. By default iOS puts all browser Web Audio into the "ringer" audio session category, which means it's muted whenever the phone is in silent mode. Since metronomes are playback content (not alerts), this is the wrong default. Fix: prime a short silent HTMLAudioElement on first user gesture before starting Web Audio. Playing HTML audio flips the iOS audio session to "playback" category, which ignores silent mode. Matches what music apps like Spotify do. Desktop and non-iOS mobile are unaffected since they don't have this ringer/playback distinction.
+// v26 (2026-04-23) — iOS silent-mode diagnostic build. v25's silent-audio trick isn't working on iOS 17+ with speakers (works with headphones, which always bypass silent mode). Added an on-screen diagnostic panel behind a #debug URL hash — tap Start and it shows AudioContext state, silent audio ready state, play promise result, sample rate, and elapsed time since last scheduled click. Temporary — will be removed once the root cause is identified and fixed.
 (function () {
   'use strict';
 
@@ -1113,6 +1121,20 @@
   let sessionPromoted = false;
   const SILENT_WAV = 'data:audio/wav;base64,UklGRiwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQgAAACAgICAgICAgA==';
 
+  // Diagnostic state for #debug panel
+  const diag = {
+    playResult: '(not attempted)',
+    playError: '',
+    silentPaused: '(n/a)',
+    silentReadyState: '(n/a)',
+    silentCurrentTime: '(n/a)',
+    ctxState: '(not created)',
+    sampleRate: '(n/a)',
+    lastScheduledAt: 0,
+    lastScheduledFor: 0,
+    scheduleCount: 0,
+  };
+
   function promoteAudioSession() {
     if (sessionPromoted) return;
     try {
@@ -1124,10 +1146,16 @@
         silentAudio.setAttribute('webkit-playsinline', '');
       }
       const p = silentAudio.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
+      if (p && typeof p.then === 'function') {
+        p.then(() => { diag.playResult = 'resolved'; })
+         .catch(err => { diag.playResult = 'rejected'; diag.playError = String(err && err.name || err); });
+      } else {
+        diag.playResult = 'no-promise';
+      }
       sessionPromoted = true;
     } catch (e) {
-      // Non-fatal — audio will still work on platforms that don't need this.
+      diag.playResult = 'threw';
+      diag.playError = String(e && e.name || e);
     }
   }
 
@@ -1155,6 +1183,9 @@
     const sound = SOUNDS[state.sound] || SOUNDS.sine;
     sound.play(audioCtx, time, accent);
     visualQueue.push({ step: step, time: time });
+    diag.scheduleCount++;
+    diag.lastScheduledAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    diag.lastScheduledFor = time;
   }
 
   function advance() {
@@ -1452,6 +1483,54 @@
   renderBeats();
   updateSegments();
   persist();
+
+  // Diagnostic panel. Only runs when URL hash contains "debug". Queries
+  // AudioContext state, silent audio element state, and scheduler counters
+  // on every animation frame and paints them into a fixed-position <pre>.
+  // Zero overhead when hidden since the early-return below never paints.
+  (function setupDebug() {
+    const debugOn = /debug/i.test(location.hash) || /debug/i.test(location.search);
+    const panel = document.getElementById('debugPanel');
+    if (!debugOn || !panel) return;
+    panel.style.display = 'block';
+
+    const ua = navigator.userAgent;
+    const platform = navigator.platform || '(unknown)';
+    // Best-effort iOS sniff — not used for logic, only labeling
+    const iosLike = /iPhone|iPad|iPod/.test(ua) ||
+                    (navigator.maxTouchPoints > 1 && /Mac/.test(platform));
+
+    function render() {
+      if (silentAudio) {
+        diag.silentPaused = String(silentAudio.paused);
+        diag.silentReadyState = String(silentAudio.readyState);
+        diag.silentCurrentTime = silentAudio.currentTime.toFixed(3);
+      }
+      if (audioCtx) {
+        diag.ctxState = audioCtx.state;
+        diag.sampleRate = audioCtx.sampleRate + ' Hz';
+      }
+      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      const msSinceSchedule = diag.lastScheduledAt > 0 ? Math.round(now - diag.lastScheduledAt) : -1;
+
+      panel.textContent =
+        'DEBUG · v26 · ' + (iosLike ? 'iOS-like' : 'other') + '\n' +
+        '------\n' +
+        'AudioContext state:  ' + diag.ctxState + '\n' +
+        'AudioContext rate:   ' + diag.sampleRate + '\n' +
+        '------\n' +
+        'silentAudio play():  ' + diag.playResult + '\n' +
+        '  error:             ' + (diag.playError || '(none)') + '\n' +
+        '  paused:            ' + diag.silentPaused + '\n' +
+        '  readyState:        ' + diag.silentReadyState + '\n' +
+        '  currentTime:       ' + diag.silentCurrentTime + '\n' +
+        '------\n' +
+        'clicks scheduled:    ' + diag.scheduleCount + '\n' +
+        'ms since last click: ' + (msSinceSchedule < 0 ? '(none yet)' : msSinceSchedule);
+      requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
+  })();
 })();
 </script>
 </body>
