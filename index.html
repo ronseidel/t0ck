@@ -729,7 +729,7 @@
   <div class="brand">t0ck</div>
   <div class="header-meta">
     <span class="jitter-dot" id="jitterDot" aria-hidden="true" title=""></span>
-    <span class="version">v32 · 20260423</span>
+    <span class="version">v34 · 20260423</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -897,6 +897,8 @@
 // v24 (2026-04-22) — bump optical correction again, 64px → 96px (32px shift → 48px). Past the standard optical-centering range but the modal body is small relative to a tall desktop viewport, and small blocks need stronger biases to feel centered. Previous 32px still read as bottom-heavy.
 // v25-v30 (2026-04-23) — [DEAD END] tried to fix iOS Safari silent-mode audio via Web Audio session promotion tricks. Root cause: iOS 26+ Safari refuses to play Web Audio through the built-in speaker regardless of approach (AirPods bypass this, which is why testing with headphones worked). Reverted v24 as baseline. v31 shipped an HTML5-only fallback as an emergency rough — deliberately not kept as live since it regressed desktop audio quality.
 // v32 (2026-04-23) — hybrid audio engine. Two backends behind a common interface: WebAudioEngine (v24's procedural oscillator synthesis, used on desktop and Android) and HtmlAudioEngine (pre-rendered click samples via HTMLAudioElement pool, used when Web Audio is silently muted — i.e. iOS speakers). Backend selection: create an AudioContext on first Start tap, play a silent test buffer, inspect the AudioContext state and AudioBufferSourceNode 'ended' event timing. If the context fails to advance normally, fall back to HTML5. All four sound variants (sine/wood/tick/beep) and accent nuance preserved in both backends — the HTML5 backend uses 8 pre-generated samples (4 sounds × 2 accent variants) baked in as ~12KB of base64 data URIs. Added jitter indicator: small colored dot near the version tag shows scheduling quality in real time (green < 10ms, yellow < 25ms, red > 25ms). Scheduler auto-stops with a message when sustained jitter exceeds 80ms for 5+ consecutive ticks, so a degraded metronome is never silently trusted.
+// v33 (2026-04-23) — fix jitter measurement bug in v32. v32 measured "jitter" at schedule time instead of play time, so it was really measuring the scheduler's look-ahead window (0-100ms by design) rather than actual playback jitter. Result: the dot immediately went red and the auto-stop triggered for everyone, even when audio was working fine. Now jitter is measured inside the setTimeout callback at the moment the click actually plays, and only for the HTML5 backend (Web Audio has no JS-observable jitter because it schedules sample-accurately). Also relaxed the auto-stop threshold from 80ms to 150ms for 10+ consecutive ticks — v32's settings were too aggressive for real-world conditions.
+// v34 (2026-04-23) — force HTML5 backend on iOS. v32's hybrid detection logic never actually triggered the HTML5 fallback on iOS because it tested "does AudioContext.currentTime advance" as a proxy for "is sound coming out." On iOS, the context advances fine — iOS just silently mutes the speaker output for Web Audio. So the detection always passed and the HTML5 engine never loaded. The honest fix is UA sniffing: if WebKit on iOS, use HTML5; otherwise use Web Audio. Not elegant, but it maps to the real distinction — iOS WebKit is the one platform where Web Audio speaker output doesn't work. This is the cost of the platform, not a detection failure on our end.
 (function () {
   'use strict';
 
@@ -1210,6 +1212,10 @@
         const delay = Math.max(0, timeMs - performance.now());
         setTimeout(function () {
           if (!isPlaying) return;
+          // Jitter = how far the actual fire time is from the scheduled
+          // time. This is the real scheduling-precision metric, not the
+          // look-ahead window we accidentally measured in v32.
+          recordJitter(timeMs, performance.now());
           try {
             a.currentTime = 0;
             const pr = a.play();
@@ -1221,43 +1227,33 @@
   })();
 
   // ---------- backend selection ----------
-  // Default to Web Audio. Detect failure by playing a tiny inaudible test
-  // buffer and observing whether the context advances its currentTime. If
-  // Web Audio is muted (iOS speaker case), currentTime stays at 0 because
-  // the render graph is blocked. After a 150ms window we measure progress
-  // and swap backends if needed. The swap is one-way per session.
-  let audioEngine = WebAudioEngine;
-  let backendLocked = false;
-
-  function detectBackend() {
-    if (backendLocked) return;
-    try {
-      WebAudioEngine.init();
-      const ctx = WebAudioEngine.ctx();
-      if (!ctx) { switchToHtml5(); return; }
-      const startedAt = ctx.currentTime;
-      const startedAtMs = performance.now();
-      setTimeout(function () {
-        const advanced = ctx.currentTime - startedAt;
-        const wallMs = performance.now() - startedAtMs;
-        // If wall clock advanced ~150ms but context barely moved, Web Audio
-        // isn't actually rendering. Threshold: context should advance at
-        // least 30ms in a 150ms window; silent muting keeps it near 0.
-        if (wallMs > 100 && advanced * 1000 < 30) {
-          switchToHtml5();
-        } else {
-          backendLocked = true;
-        }
-      }, 150);
-    } catch (e) {
-      switchToHtml5();
-    }
+  // iOS WebKit (Safari and all iOS browsers, since they all share WebKit)
+  // silently mutes Web Audio output to the built-in speaker. AudioContext
+  // reports as "running" and currentTime advances normally — but no sound
+  // comes out. There's no JS-observable signal to distinguish "working"
+  // from "muted by iOS," so we can't detect the problem at runtime. The
+  // only reliable signal is "are we on iOS." UA sniffing is normally
+  // avoided in modern web dev, but here it maps to a real capability
+  // difference that no feature-detection API exposes.
+  //
+  // Desktop + Android: Web Audio, sample-accurate timing, 4 unique sounds.
+  // iOS Safari/Chrome/Firefox/etc (all WebKit): HTML5 audio, pre-rendered
+  // samples, setTimeout scheduling.
+  function isIOS() {
+    const ua = navigator.userAgent || '';
+    // iPhone/iPad/iPod on any iOS version. iPadOS reports as "Macintosh"
+    // but with touch points, so also check that.
+    if (/iPhone|iPad|iPod/.test(ua)) return true;
+    if (/Macintosh/.test(ua) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1) return true;
+    return false;
   }
 
-  function switchToHtml5() {
-    audioEngine = HtmlAudioEngine;
+  let audioEngine = isIOS() ? HtmlAudioEngine : WebAudioEngine;
+
+  function detectBackend() {
+    // Initialize whichever backend was selected. No runtime switching —
+    // the selection is made once at first play attempt based on platform.
     audioEngine.init();
-    backendLocked = true;
   }
 
   // Legacy SOUNDS shim — settings-change preview calls SOUNDS[state.sound].play()
@@ -1287,25 +1283,34 @@
   const JITTER_WINDOW_SIZE = 8;
   let lastJitterMs = 0;
   let consecutiveBadTicks = 0;
-  const BAD_TICK_JITTER_MS = 80;
-  const BAD_TICK_THRESHOLD = 5;
+  // Thresholds tuned for real-world conditions. v32 was too aggressive
+  // (80ms/5ticks) and triggered auto-stops during normal operation on
+  // iOS HTML5 audio. These values allow for the natural jitter of
+  // setTimeout-based scheduling without flagging healthy playback.
+  const BAD_TICK_JITTER_MS = 150;
+  const BAD_TICK_THRESHOLD = 10;
 
   function ensureCtx() {
     detectBackend();
   }
 
-  // Jitter indicator: updates the small colored dot in the header. Hidden
-  // while stopped, active while playing. Color reflects worst recent jitter
-  // over the past JITTER_WINDOW_SIZE ticks.
+  // Jitter indicator: updates the small colored dot in the header. Only
+  // shown while playing on the HTML5 backend (Web Audio uses sample-accurate
+  // scheduling with no JS-observable jitter, so the indicator is meaningless
+  // there). Color reflects worst recent jitter over the past
+  // JITTER_WINDOW_SIZE ticks. Thresholds are generous because setTimeout-
+  // based playback has inherent 10-30ms variance even on healthy devices;
+  // only flag truly problematic jitter.
   function updateJitterIndicator() {
     const dot = document.getElementById('jitterDot');
     if (!dot) return;
-    if (!isPlaying) { dot.classList.remove('active', 'good', 'marginal', 'bad'); dot.title = ''; return; }
+    const showDot = isPlaying && audioEngine === HtmlAudioEngine;
+    if (!showDot) { dot.classList.remove('active', 'good', 'marginal', 'bad'); dot.title = ''; return; }
     dot.classList.add('active');
     dot.classList.remove('good', 'marginal', 'bad');
     let cls = 'good';
-    if (lastJitterMs > 25) cls = 'bad';
-    else if (lastJitterMs > 10) cls = 'marginal';
+    if (lastJitterMs > 80) cls = 'bad';
+    else if (lastJitterMs > 40) cls = 'marginal';
     dot.classList.add(cls);
     dot.title = 'Timing jitter: ' + Math.round(lastJitterMs) + ' ms';
   }
@@ -1364,7 +1369,9 @@
     const accent = (isDownbeat && accentActive) ? 'down' : isMainBeat ? 'main' : 'sub';
     audioEngine.play(state.sound, accent, timeMs);
     visualQueue.push({ step: step, time: timeMs, scheduledAt: timeMs });
-    recordJitter(timeMs, performance.now());
+    // Jitter is measured inside the HTML5 backend's setTimeout callback
+    // (not here — here we're just scheduling, not playing). Web Audio has
+    // no observable jitter because it uses sample-accurate scheduling.
   }
 
   function advance() {
