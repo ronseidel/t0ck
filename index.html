@@ -205,9 +205,16 @@
     letter-spacing: -0.02em; margin-bottom: 10px; color: var(--ink);
   }
   .jitter-alert-body {
-    font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.5;
-    color: var(--ink); opacity: 0.85; margin-bottom: 20px;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink);
+    opacity: 0.85;
+    margin-bottom: 20px;
     text-wrap: pretty;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+    hyphens: auto;
   }
   .jitter-alert-ok {
     width: 100%; padding: 12px 16px;
@@ -1314,8 +1321,8 @@
     overlay.className = 'jitter-alert';
     overlay.innerHTML = '<div class="jitter-alert-inner">' +
       '<div class="jitter-alert-title">Stopped — timing drifted</div>' +
-      '<div class="jitter-alert-body">Your device is struggling to keep precise time at this tempo. ' +
-      'Try a lower BPM, simpler subdivision, or closing other tabs and apps.</div>' +
+      '<div class="jitter-alert-body">Your device is struggling to keep precise time. ' +
+      'Try a lower BPM or simpler subdivision.</div>' +
       '<button class="jitter-alert-ok" type="button">OK</button>' +
       '</div>';
     document.body.appendChild(overlay);
