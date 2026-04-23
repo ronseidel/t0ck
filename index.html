@@ -666,7 +666,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v26 · 20260422</span>
+    <span class="version">v27 · 20260423</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -841,6 +841,7 @@
 // v24 (2026-04-22) — bump optical correction again, 64px → 96px (32px shift → 48px). Past the standard optical-centering range but the modal body is small relative to a tall desktop viewport, and small blocks need stronger biases to feel centered. Previous 32px still read as bottom-heavy.
 // v25 (2026-04-22) — iOS silent-mode audio fix. By default iOS puts all browser Web Audio into the "ringer" audio session category, which means it's muted whenever the phone is in silent mode. Since metronomes are playback content (not alerts), this is the wrong default. Fix: prime a short silent HTMLAudioElement on first user gesture before starting Web Audio. Playing HTML audio flips the iOS audio session to "playback" category, which ignores silent mode. Matches what music apps like Spotify do. Desktop and non-iOS mobile are unaffected since they don't have this ringer/playback distinction.
 // v26 (2026-04-23) — iOS silent-mode diagnostic build. v25's silent-audio trick isn't working on iOS 17+ with speakers (works with headphones, which always bypass silent mode). Added an on-screen diagnostic panel behind a #debug URL hash — tap Start and it shows AudioContext state, silent audio ready state, play promise result, sample rate, and elapsed time since last scheduled click. Temporary — will be removed once the root cause is identified and fixed.
+// v27 (2026-04-23) — fix debug access URL. v26 used #debug as the gate, but the app's URL parser interprets everything after # as BPM/state and rewrites invalid values to defaults — so /#debug was silently redirecting to /#120. Debug gate is now ?debug (query string), which the parser ignores. Access via t0ck.app/?debug or t0ck.app/?debug#120 for debug while keeping a specific BPM.
 (function () {
   'use strict';
 
@@ -905,7 +906,10 @@
     if (nondefaultSub || nondefaultSound || nondefaultAccent) parts.push(state.sub);
     if (nondefaultSound || nondefaultAccent) parts.push(state.sound);
     if (nondefaultAccent) parts.push('flat');
-    return '#' + parts.join('/');
+    // Preserve any existing query string (e.g. ?debug) so history.replaceState
+    // doesn't strip it. Without this, adding ?debug and then interacting with
+    // the app would silently lose the flag on the first persist() call.
+    return (location.search || '') + '#' + parts.join('/');
   }
 
   function encodePrefs() {
