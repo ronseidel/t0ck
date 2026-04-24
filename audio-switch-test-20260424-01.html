@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>audio-switch-test — 0fam / t0ck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+  <style>
+    :root {
+      --bg: #F9F9F9;
+      --ink: #034D32;
+      --accent: #028454;
+      --accent-bg: #E4F3EE;
+      --border: #C0DDD4;
+      --mint: #00BD78;
+      --muted: rgba(3, 77, 50, 0.6);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a1410;
+        --ink: #E4F3EE;
+        --accent: #00BD78;
+        --accent-bg: #0f2a20;
+        --border: #1e3a2e;
+        --mint: #00BD78;
+        --muted: rgba(228, 243, 238, 0.55);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--bg);
+      color: var(--ink);
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      padding: 24px 18px 40px;
+      max-width: 560px;
+      margin: 0 auto;
+      -webkit-font-smoothing: antialiased;
+    }
+    .brand {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-family: 'Space Mono', monospace;
+      font-size: 20px;
+      margin: 0 0 4px 0;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 22px;
+      line-height: 1.5;
+    }
+    .panel {
+      background: var(--accent-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 12px;
+    }
+    .loading { text-align: center; padding: 24px 16px; }
+    .spinner {
+      width: 26px; height: 26px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+    }
+    .mode-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .mode-chips {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .mode-chip {
+      flex: 1;
+      min-width: 0;
+      padding: 11px 6px;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 80ms ease, color 80ms ease;
+    }
+    .mode-chip.active {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+    }
+    .mode-desc {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+      min-height: 36px;
+    }
+    .current-sound {
+      text-align: center;
+      padding: 20px 0 14px;
+    }
+    .current-sound .label {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+    .current-sound .value {
+      font-family: 'Space Mono', monospace;
+      font-size: 48px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+      text-transform: uppercase;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+    }
+    button.action {
+      flex: 1;
+      padding: 15px 10px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 700;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button.action.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--border);
+    }
+    button.action:active { transform: scale(0.98); }
+    button.action:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+    .log {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--accent-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .log-entry {
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(0,0,0,0.04);
+    }
+    .log-entry:last-child { border-bottom: none; }
+    .log-entry .mode { color: var(--accent); font-weight: 700; }
+    .log-entry .ms { color: var(--ink); font-weight: 700; }
+    .notes {
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--ink);
+      padding: 12px 14px;
+      background: var(--accent-bg);
+      border-left: 3px solid var(--accent);
+      border-radius: 4px;
+      margin-top: 12px;
+    }
+    .notes strong { color: var(--accent); font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+    .notes ul { margin: 4px 0 0; padding-left: 16px; }
+    .notes li { margin-bottom: 3px; }
+  </style>
+</head>
+<body>
+  <div class="brand">0fam / t0ck</div>
+  <h1>audio-switch-test</h1>
+  <div class="sub">Comparing three swap mechanisms on iOS Safari speaker. Files are 30-second 120&nbsp;BPM click tracks, sine vs wood.</div>
+
+  <div class="panel" id="loadingPanel">
+    <div class="loading">
+      <div class="spinner"></div>
+      <div class="loading-text" id="loadingText">initializing…</div>
+    </div>
+  </div>
+
+  <div class="panel" id="testPanel" style="display:none;">
+    <div class="mode-label">Swap mode</div>
+    <div class="mode-chips" id="modeChips">
+      <button class="mode-chip active" data-mode="src">Src Swap</button>
+      <button class="mode-chip" data-mode="dual-play">Dual Play</button>
+      <button class="mode-chip" data-mode="dual-vol">Dual Vol</button>
+    </div>
+    <div class="mode-desc" id="modeDesc">Change audio.src on a single element, pause/play. This is what t0ck v47 does.</div>
+
+    <div class="current-sound">
+      <div class="label">Now playing</div>
+      <div class="value" id="currentSound">sine</div>
+    </div>
+
+    <div class="controls">
+      <button class="action" id="playBtn">Play</button>
+      <button class="action secondary" id="switchBtn" disabled>Switch</button>
+      <button class="action secondary" id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <div class="notes">
+      <strong>Test protocol</strong>
+      <ul>
+        <li>Pick a mode. Tap Play. You should hear sine-wave clicks.</li>
+        <li>Tap Switch. Note how long the gap is before you hear wood clicks.</li>
+        <li>Tap Switch again. Then repeat a bunch of times.</li>
+        <li>Switch to next mode, repeat.</li>
+        <li>Log shows ms from tap to audio state change — but trust your ears, they're the real judge.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Audio elements — one for each mode. Stay alive across mode switches. -->
+  <audio id="audioA" preload="auto" playsinline></audio>
+  <audio id="audioB" preload="auto" playsinline></audio>
+  <audio id="audioSrc" preload="auto" playsinline></audio>
+
+  <script>
+  /*
+    audio-switch-test-20260424-01.html
+
+    Compares three mechanisms for switching between two click-track MP3s
+    on iOS Safari speaker:
+      (1) src — src swap on one <audio> element (v47 behavior, baseline)
+      (2) dual-play — two pre-loaded <audio> elements, pause A → seek B → play B
+      (3) dual-vol  — two <audio> elements playing simultaneously, volume gate
+
+    Each switch is timed: from user tap to the first measurable change in
+    audio.currentTime (sub-frame detection via rAF) on the target element.
+    Also tracked: play() promise resolution latency.
+
+    Sine and Wood were chosen because they're audibly distinct — a switch
+    that works sounds obvious; a switch that's stuck is also obvious.
+
+    The 30-second clips are rendered fresh in-browser (same pipeline as
+    t0ck proper: OfflineAudioContext click templates → Float32Array paste
+    → lamejs MP3 encode), so the test exercises the real audio path.
+  */
+
+  const SR = 44100;
+  const DURATION_SEC = 30;
+  const BPM = 120;
+
+  const $ = id => document.getElementById(id);
+
+  // --- Dark mode ---
+  function applyTheme() {
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const bg = dark ? '#0a1410' : '#F9F9F9';
+    const ink = dark ? '#E4F3EE' : '#034D32';
+    document.documentElement.style.backgroundColor = bg;
+    document.documentElement.style.color = ink;
+    document.body.style.backgroundColor = bg;
+    document.body.style.color = ink;
+  }
+  applyTheme();
+
+  // --- Click template recipes (same as t0ck's sine + wood) ---
+  function renderClickTemplate(kind, ctx) {
+    const TWO_PI = Math.PI * 2;
+    if (kind === 'sine') {
+      const osc = ctx.createOscillator(); const env = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.setValueAtTime(800, 0);
+      osc.connect(env); env.connect(ctx.destination);
+      env.gain.setValueAtTime(0.0001, 0);
+      env.gain.linearRampToValueAtTime(0.40, 0.002);
+      env.gain.exponentialRampToValueAtTime(0.0001, 0.04);
+      osc.start(0); osc.stop(0.05);
+    } else {  // wood
+      const osc = ctx.createOscillator(); const env = ctx.createGain();
+      osc.type = 'triangle'; osc.frequency.setValueAtTime(1200, 0);
+      osc.frequency.exponentialRampToValueAtTime(600, 0.012);
+      osc.connect(env); env.connect(ctx.destination);
+      env.gain.setValueAtTime(0.0001, 0);
+      env.gain.linearRampToValueAtTime(0.38, 0.001);
+      env.gain.exponentialRampToValueAtTime(0.0001, 0.025);
+      osc.start(0); osc.stop(0.035);
+    }
+  }
+
+  async function renderTemplate(kind) {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const pad = Math.ceil(SR * 0.08);
+    const ctx = new OAC(1, pad, SR);
+    renderClickTemplate(kind, ctx);
+    const buf = await ctx.startRendering();
+    return new Float32Array(buf.getChannelData(0));
+  }
+
+  async function renderTrack(kind) {
+    const tmpl = await renderTemplate(kind);
+    const beatInterval = 60 / BPM;
+    const total = Math.floor(DURATION_SEC / beatInterval);
+    const totalSamples = SR * DURATION_SEC;
+    const samples = new Float32Array(totalSamples);
+    for (let i = 0; i < total; i++) {
+      const start = Math.floor(i * beatInterval * SR);
+      const maxJ = Math.min(tmpl.length, totalSamples - start);
+      for (let j = 0; j < maxJ; j++) samples[start + j] = tmpl[j];
+    }
+    return samples;
+  }
+
+  async function encodeMP3(channelData) {
+    const int16 = new Int16Array(channelData.length);
+    for (let i = 0; i < channelData.length; i++) {
+      const s = Math.max(-1, Math.min(1, channelData[i]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    const enc = new lamejs.Mp3Encoder(1, SR, 128);
+    const chunks = [];
+    const blockSize = 1152;
+    let count = 0;
+    for (let i = 0; i < int16.length; i += blockSize) {
+      const part = int16.subarray(i, i + blockSize);
+      const out = enc.encodeBuffer(part);
+      if (out.length > 0) chunks.push(out);
+      count++;
+      if (count % 200 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+    const tail = enc.flush();
+    if (tail.length > 0) chunks.push(tail);
+    return new Blob(chunks, { type: 'audio/mp3' });
+  }
+
+  // --- Boot: render both tracks, set up audio elements ---
+  let urlSine = null, urlWood = null;
+  const audioA = $('audioA'), audioB = $('audioB'), audioSrc = $('audioSrc');
+  for (const a of [audioA, audioB, audioSrc]) {
+    a.setAttribute('playsinline', '');
+    try { a.preservesPitch = false; } catch (e) {}
+  }
+
+  async function boot() {
+    try {
+      $('loadingText').textContent = 'rendering sine…';
+      const sineSamples = await renderTrack('sine');
+      $('loadingText').textContent = 'encoding sine…';
+      const sineBlob = await encodeMP3(sineSamples);
+      urlSine = URL.createObjectURL(sineBlob);
+
+      $('loadingText').textContent = 'rendering wood…';
+      const woodSamples = await renderTrack('wood');
+      $('loadingText').textContent = 'encoding wood…';
+      const woodBlob = await encodeMP3(woodSamples);
+      urlWood = URL.createObjectURL(woodBlob);
+
+      // Preload for dual-play + dual-vol modes.
+      audioA.src = urlSine;
+      audioB.src = urlWood;
+      audioA.load();
+      audioB.load();
+      // Preload for src-swap mode.
+      audioSrc.src = urlSine;
+      audioSrc.load();
+
+      $('loadingPanel').style.display = 'none';
+      $('testPanel').style.display = 'block';
+    } catch (err) {
+      $('loadingText').textContent = 'failed: ' + (err && err.message || err);
+      console.error(err);
+    }
+  }
+  boot();
+
+  // --- Mode selection ---
+  const modeDescriptions = {
+    'src': 'Change audio.src on a single element, pause/play. This is what t0ck v47 does. The mechanism we suspect is slow on iOS.',
+    'dual-play': 'Two pre-loaded audio elements. On switch: pause the current, seek the other to match currentTime, play the other.',
+    'dual-vol': 'Two audio elements playing simultaneously from the same currentTime. Switch just flips volume 1↔0. No pause/play, no seek.'
+  };
+  let mode = 'src';
+  let currentSound = 'sine';
+  let isPlaying = false;
+  let dualVolRafId = null;
+
+  $('modeChips').addEventListener('click', (e) => {
+    const chip = e.target.closest('.mode-chip');
+    if (!chip) return;
+    if (isPlaying) { stop(); }
+    document.querySelectorAll('.mode-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    mode = chip.dataset.mode;
+    $('modeDesc').textContent = modeDescriptions[mode];
+    // Reset state to sine
+    currentSound = 'sine';
+    $('currentSound').textContent = 'sine';
+  });
+
+  // --- Playback control ---
+  function start() {
+    if (mode === 'src') {
+      audioSrc.src = urlSine;
+      audioSrc.currentTime = 0;
+      audioSrc.volume = 1;
+      audioSrc.play().catch(err => console.error(err));
+    } else if (mode === 'dual-play') {
+      audioA.currentTime = 0;
+      audioB.currentTime = 0;
+      audioA.volume = 1;
+      audioB.volume = 1;
+      // Only A plays; B waits paused.
+      audioA.play().catch(err => console.error(err));
+    } else if (mode === 'dual-vol') {
+      audioA.currentTime = 0;
+      audioB.currentTime = 0;
+      audioA.volume = 1;
+      audioB.volume = 0;
+      // Both play, volume controls which is audible.
+      Promise.all([audioA.play(), audioB.play()]).catch(err => console.error(err));
+      // Drift watchdog: re-sync every 2 seconds.
+      dualVolRafId = setInterval(() => {
+        const diff = Math.abs(audioA.currentTime - audioB.currentTime);
+        if (diff > 0.01) {
+          const t = (audioA.currentTime + audioB.currentTime) / 2;
+          // Don't seek during audio playback — just log it.
+          // Seeking itself causes a gap. Better to know how much drift occurs.
+          logEntry('drift', Math.round(diff * 1000) + ' ms drift between A and B');
+        }
+      }, 2000);
+    }
+    currentSound = 'sine';
+    $('currentSound').textContent = 'sine';
+    isPlaying = true;
+    $('playBtn').disabled = true;
+    $('switchBtn').disabled = false;
+    $('stopBtn').disabled = false;
+  }
+
+  function stop() {
+    audioSrc.pause(); audioA.pause(); audioB.pause();
+    audioSrc.currentTime = 0; audioA.currentTime = 0; audioB.currentTime = 0;
+    if (dualVolRafId) { clearInterval(dualVolRafId); dualVolRafId = null; }
+    isPlaying = false;
+    $('playBtn').disabled = false;
+    $('switchBtn').disabled = true;
+    $('stopBtn').disabled = true;
+  }
+
+  // --- Switch: the measurement event ---
+  function doSwitch() {
+    if (!isPlaying) return;
+    const target = currentSound === 'sine' ? 'wood' : 'sine';
+    const targetUrl = target === 'sine' ? urlSine : urlWood;
+    const t0 = performance.now();
+
+    if (mode === 'src') {
+      // Capture currentTime before swap so we can resume at the same spot.
+      const savedTime = audioSrc.currentTime;
+      audioSrc.pause();
+      audioSrc.src = targetUrl;
+      const t1 = performance.now();
+      audioSrc.currentTime = savedTime;  // may fail silently if not seekable yet
+      // Measure when currentTime actually starts advancing.
+      const playPromise = audioSrc.play();
+      const t2 = performance.now();
+      measureAudioResume(audioSrc, t0, t2, mode, target);
+      if (playPromise && playPromise.catch) playPromise.catch(err => console.error(err));
+    } else if (mode === 'dual-play') {
+      // A is currently playing; B is paused at 0 (or last position).
+      const curr = currentSound === 'sine' ? audioA : audioB;
+      const next = currentSound === 'sine' ? audioB : audioA;
+      // Pre-seek next to current position (best effort; may be slow on iOS).
+      const savedTime = curr.currentTime;
+      curr.pause();
+      next.currentTime = savedTime;
+      const t1 = performance.now();
+      const playPromise = next.play();
+      const t2 = performance.now();
+      measureAudioResume(next, t0, t2, mode, target);
+      if (playPromise && playPromise.catch) playPromise.catch(err => console.error(err));
+    } else if (mode === 'dual-vol') {
+      // Both playing. Just flip volumes.
+      const curr = currentSound === 'sine' ? audioA : audioB;
+      const next = currentSound === 'sine' ? audioB : audioA;
+      curr.volume = 0;
+      next.volume = 1;
+      const t1 = performance.now();
+      logEntry(mode, 'volume flip done in ' + (t1 - t0).toFixed(1) + ' ms (audible change should be instant)');
+    }
+
+    currentSound = target;
+    $('currentSound').textContent = target;
+  }
+
+  // Poll audio.currentTime in rAF to detect when it starts advancing after a
+  // switch. Gives sub-frame precision on when audio actually became audible.
+  function measureAudioResume(audioEl, t0, t2, modeName, target) {
+    const startTime = audioEl.currentTime;
+    const deadline = performance.now() + 2000;
+    function check() {
+      if (audioEl.currentTime > startTime) {
+        const t3 = performance.now();
+        logEntry(modeName,
+          '→ ' + target + ' · '
+          + 'play() call at ' + Math.round(t2 - t0) + ' ms, '
+          + 'audio advancing at ' + Math.round(t3 - t0) + ' ms');
+        return;
+      }
+      if (performance.now() > deadline) {
+        logEntry(modeName, '→ ' + target + ' · audio never started within 2s (check log)');
+        return;
+      }
+      requestAnimationFrame(check);
+    }
+    requestAnimationFrame(check);
+  }
+
+  function logEntry(modeName, text) {
+    const log = $('log');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.innerHTML = '<span class="mode">[' + modeName + ']</span> ' + text;
+    log.insertBefore(entry, log.firstChild);
+    // Keep log manageable.
+    while (log.children.length > 30) {
+      log.removeChild(log.lastChild);
+    }
+  }
+
+  $('playBtn').addEventListener('click', start);
+  $('switchBtn').addEventListener('click', doSwitch);
+  $('stopBtn').addEventListener('click', stop);
+  </script>
+</body>
+</html>
