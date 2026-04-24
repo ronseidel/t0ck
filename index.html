@@ -2,7 +2,7 @@
 <html lang="en" style="background:#F9F9F9;color:#034D32">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>t0ck — simple metronome</title>
 
@@ -714,7 +714,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v54 · 20260424</span>
+    <span class="version">v55 · 20260424</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -912,6 +912,7 @@
 // v52 (2026-04-24) — dropped <input type="number"> in favor of <input type="text" inputmode="numeric" pattern="[0-9]*"> to eliminate iOS's scrubber/magnifier pill overlay that can't be styled. type="text" + inputmode="numeric" gets the same numeric keypad on iOS/Android without the system-chrome scrubber that was causing the gray selection look in v51. Our in-field ::selection now shows green as intended. Trade-offs: (a) lost native HTML5 min/max validation, but we already clamp in setBpm(), so no functional change; (b) lost the browser's up/down stepper arrows, which we never used because we have our own +/- buttons; (c) need to sanitize non-digit input ourselves because type="text" doesn't reject them — added a digit-strip in the input handler for paste/hardware-keyboard edge cases. Added maxlength="3" so the field can't exceed three digits (matches our 300 BPM ceiling). Also set autocomplete="off", autocorrect="off", spellcheck="false" since browsers don't need to suggest completions for a BPM field.
 // v53 (2026-04-24) — iOS was showing an "audio playing" indicator in the system status bar even when the metronome wasn't running. Cause: v48's iosSpeakerKeepalive module started the silent backing track on first user interaction and left it running forever (Option C from the v48 design discussion). That keeps iOS's audio session perpetually active, which lights up the status-bar indicator whenever the user leaves the app. Fix: prime() now pauses the track immediately after the gesture-bound play() resolves — that's enough to establish the speaker route. Added explicit start()/stop() methods that the metronome's start/stop functions now call. Result: silent track only plays while metronome is actually running. Test A from hybrid-edge-test confirmed the speaker route re-establishes cleanly across pause/resume cycles, so this doesn't regress the fundamental fix. Non-iOS platforms are unaffected — they don't reach the keepalive code path.
 // v54 (2026-04-24) — v53 introduced a race: rapid stop/start cycles produced silent runs because the silent track's play() promise was still resolving when WebAudio fired its first click, so the click missed the speaker route. Fixed by deferring the pause by 800ms after stop() is called. If the user starts again within that window (which is what rapid toggling looks like), we cancel the pending timer and never actually pause — the speaker route stays open across the toggle. Long pauses still hit the timeout and pause normally, preserving v53's status-bar fix for the case that actually matters (user walks away from the app for a while). 800ms picked as a balance: long enough to absorb tempo scrubbing, sound exploration, and accidental double-taps; short enough that the status indicator clears reasonably promptly when the user actually walks away. Also added an isPaused check in start() so we don't issue a redundant play() during the grace period.
+// v55 (2026-04-24) — iOS Safari was auto-zooming the viewport when users tapped the +/− and tap-tempo buttons. iOS does this when any focusable element has a font-size below 16px (a long-standing "feature" intended to help users read tiny form fields). Our buttons use Space Mono at ~12-14px for visual rhythm. Two fixes available: bump all button text to 16px+ (changes the design language), or disable viewport scaling entirely. Chose the latter via user-scalable=no + maximum-scale=1.0 in the viewport meta. Trade-off: pinch-zoom is now disabled across the whole app. For a metronome — no text content, all interactions are tap-based — this is a defensible call. The auto-zoom was actively breaking the UX (users tapping +/- for fast tempo adjustments saw the page jump and wobble); pinch-zoom was a feature nobody was likely to use here. Net positive on a tool that's specifically designed for one-handed phone use.
 (function () {
   'use strict';
 
