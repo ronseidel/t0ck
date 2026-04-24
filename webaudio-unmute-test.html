@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>webaudio-unmute-test — 0fam / t0ck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #F9F9F9;
+      --ink: #034D32;
+      --accent: #028454;
+      --accent-bg: #E4F3EE;
+      --border: #C0DDD4;
+      --mint: #00BD78;
+      --muted: rgba(3, 77, 50, 0.6);
+      --warn: #b8741c;
+      --warn-bg: #fdf3e4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a1410;
+        --ink: #E4F3EE;
+        --accent: #00BD78;
+        --accent-bg: #0f2a20;
+        --border: #1e3a2e;
+        --mint: #00BD78;
+        --muted: rgba(228, 243, 238, 0.55);
+        --warn: #e6a755;
+        --warn-bg: #2a1d0a;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--bg);
+      color: var(--ink);
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      padding: 24px 18px 40px;
+      max-width: 560px;
+      margin: 0 auto;
+      -webkit-font-smoothing: antialiased;
+    }
+    .brand {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-family: 'Space Mono', monospace;
+      font-size: 20px;
+      margin: 0 0 4px 0;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+    .test-block {
+      background: var(--accent-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 16px;
+      margin-bottom: 12px;
+    }
+    .test-num {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .test-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0 0 6px 0;
+    }
+    .test-body {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--ink);
+      margin-bottom: 12px;
+    }
+    .test-body code {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      background: rgba(3, 77, 50, 0.08);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button.act {
+      padding: 11px 14px;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 7px;
+      cursor: pointer;
+      font-weight: 700;
+      -webkit-tap-highlight-color: transparent;
+      flex: 1;
+      min-width: 110px;
+    }
+    button.act.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--border);
+    }
+    button.act:active { transform: scale(0.98); }
+    button.act:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+    .result {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      line-height: 1.5;
+      display: none;
+    }
+    .result.show { display: block; }
+    .result.ok  { background: rgba(0, 189, 120, 0.12); color: var(--accent); border: 1px solid rgba(0, 189, 120, 0.3); }
+    .result.no  { background: rgba(201, 79, 62, 0.12); color: #c94f3e;      border: 1px solid rgba(201, 79, 62, 0.3); }
+    .result.info { background: var(--warn-bg); color: var(--warn); border: 1px solid rgba(184, 116, 28, 0.3); }
+    .summary {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 20px;
+    }
+    .summary h2 {
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0 0 10px 0;
+    }
+    .summary p {
+      font-size: 12px;
+      line-height: 1.6;
+      margin: 0 0 8px 0;
+    }
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-top: 8px;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="brand">0fam / t0ck</div>
+  <h1>webaudio-unmute-test</h1>
+  <div class="sub">Does iOS unmute Web Audio on the speaker when an HTMLAudioElement is also playing? If yes, t0ck can switch sounds instantly. If no, we're done tinkering and v47 is the best we get.</div>
+
+  <div class="test-block">
+    <div class="test-num">Test 1</div>
+    <h2 class="test-title">Baseline: Web Audio alone</h2>
+    <div class="test-body">
+      Plays 3 beeps using only Web Audio. On iOS speaker this should be <strong>silent</strong>
+      (the bug we're working around in t0ck). If you hear anything, you're on headphones —
+      switch to speaker and retest.
+    </div>
+    <div class="actions">
+      <button class="act" id="test1Btn">Play 3 Beeps</button>
+    </div>
+    <div class="result" id="test1Result"></div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-num">Test 2</div>
+    <h2 class="test-title">HTMLAudio alone (control)</h2>
+    <div class="test-body">
+      Plays a 3-second tone via an HTMLAudioElement. Should be <strong>audible</strong> on speaker —
+      that's why t0ck v47 uses this path. Just confirming the control works.
+    </div>
+    <div class="actions">
+      <button class="act" id="test2Btn">Play Tone</button>
+    </div>
+    <div class="result" id="test2Result"></div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-num">Test 3</div>
+    <h2 class="test-title">The hypothesis: HTMLAudio + Web Audio layered</h2>
+    <div class="test-body">
+      Starts a silent-ish HTMLAudioElement track playing in the background, then fires a Web Audio
+      beep on top. The question: does iOS "unmute" Web Audio because another media element has
+      already established speaker output? <strong>If you hear the beep</strong>, the hybrid engine
+      is viable. If only the background track comes through (no beep on top), the bug persists.
+    </div>
+    <div class="actions">
+      <button class="act" id="test3Btn">Start + Beep</button>
+      <button class="act secondary" id="test3Stop" disabled>Stop</button>
+    </div>
+    <div class="result" id="test3Result"></div>
+    <div class="hint">If Test 3 works, try tapping "Start + Beep" a few times in quick succession — the multiple beeps tell you whether Web Audio is actually driving the speaker, since only Web Audio could fire them that fast in that pattern.</div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-num">Test 4</div>
+    <h2 class="test-title">Variant: AudioContext created AFTER audio element plays</h2>
+    <div class="test-body">
+      Same as Test 3, but we wait until the HTMLAudioElement is confirmed playing before we create
+      the AudioContext. Some iOS Safari versions have different rules depending on the order.
+    </div>
+    <div class="actions">
+      <button class="act" id="test4Btn">Start + Beep (delayed ctx)</button>
+      <button class="act secondary" id="test4Stop" disabled>Stop</button>
+    </div>
+    <div class="result" id="test4Result"></div>
+  </div>
+
+  <div class="summary">
+    <h2>After testing</h2>
+    <p>Report back which tests you could hear:</p>
+    <p>• Test 1 (Web Audio alone on speaker): <strong>heard</strong> / <strong>silent</strong></p>
+    <p>• Test 2 (HTMLAudio alone): <strong>heard</strong> / <strong>silent</strong></p>
+    <p>• Test 3 (layered, standard order): <strong>beep audible</strong> / <strong>only background track</strong></p>
+    <p>• Test 4 (layered, delayed ctx): <strong>beep audible</strong> / <strong>only background track</strong></p>
+  </div>
+
+  <audio id="bgAudio" preload="auto" playsinline loop></audio>
+
+  <script>
+  /*
+    webaudio-unmute-test-20260424-01.html
+
+    Answers the question: can we use Web Audio for click synthesis on iOS
+    speaker IF an HTMLAudioElement is playing at the same time?
+
+    Test 1: Web Audio alone → baseline, should be silent on iOS speaker.
+    Test 2: HTMLAudioElement alone → control, should be audible.
+    Test 3: HTMLAudio playing, then Web Audio beep on top → hypothesis test.
+    Test 4: Same as 3 but create AudioContext AFTER audio element starts playing.
+
+    If Test 3 or 4 passes, t0ck v48 can use a hybrid engine: silent or quiet
+    backing track keeps the speaker open, Web Audio synthesizes clicks on top
+    with instant sound/sig/sub/accent changes (no file swap). If neither
+    passes, we know v47 is architecturally optimal for this approach.
+  */
+
+  const $ = id => document.getElementById(id);
+
+  // --- Dark mode ---
+  function applyTheme() {
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const bg = dark ? '#0a1410' : '#F9F9F9';
+    const ink = dark ? '#E4F3EE' : '#034D32';
+    document.documentElement.style.backgroundColor = bg;
+    document.documentElement.style.color = ink;
+    document.body.style.backgroundColor = bg;
+    document.body.style.color = ink;
+  }
+  applyTheme();
+
+  // --- Build a silent-ish backing track (generated in-browser, no CDN dep) ---
+  // Takes a moment to generate, so we do it once and cache the blob URL.
+  let bgUrl = null;
+  async function buildBgTrack() {
+    if (bgUrl) return bgUrl;
+    const SR = 44100;
+    const DUR = 5;
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const ctx = new OAC(1, SR * DUR, SR);
+    // Just a very quiet sine wave at 60Hz — below hearing for most people on
+    // phone speakers but enough to keep the audio pipeline "active."
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 60;
+    gain.gain.value = 0.002;  // barely audible
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(0); osc.stop(DUR);
+    const buf = await ctx.startRendering();
+    // Encode to WAV (quick, no CDN dep). Small file for 5s mono at 44.1.
+    bgUrl = URL.createObjectURL(bufferToWavBlob(buf));
+    return bgUrl;
+  }
+
+  function bufferToWavBlob(audioBuffer) {
+    const numCh = 1;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    const bytesPerSample = 2;
+    const buffer = new ArrayBuffer(44 + length * numCh * bytesPerSample);
+    const view = new DataView(buffer);
+    let p = 0;
+    function writeStr(s) { for (let i = 0; i < s.length; i++) view.setUint8(p++, s.charCodeAt(i)); }
+    function writeU32(n) { view.setUint32(p, n, true); p += 4; }
+    function writeU16(n) { view.setUint16(p, n, true); p += 2; }
+    writeStr('RIFF'); writeU32(36 + length * numCh * bytesPerSample); writeStr('WAVE');
+    writeStr('fmt '); writeU32(16); writeU16(1); writeU16(numCh);
+    writeU32(sampleRate); writeU32(sampleRate * numCh * bytesPerSample);
+    writeU16(numCh * bytesPerSample); writeU16(8 * bytesPerSample);
+    writeStr('data'); writeU32(length * numCh * bytesPerSample);
+    const channel = audioBuffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      const s = Math.max(-1, Math.min(1, channel[i]));
+      view.setInt16(p, s < 0 ? s * 0x8000 : s * 0x7FFF, true); p += 2;
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  function showResult(elId, status, text) {
+    const el = $(elId);
+    el.className = 'result show ' + status;  // ok / no / info
+    el.textContent = text;
+  }
+
+  // --- Reusable Web Audio beeper ---
+  function makeBeep(ctx) {
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    const t = ctx.currentTime;
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.linearRampToValueAtTime(0.5, t + 0.005);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    osc.connect(env).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.2);
+  }
+
+  // --- Test 1: Web Audio alone ---
+  $('test1Btn').addEventListener('click', async () => {
+    showResult('test1Result', 'info', 'Firing 3 beeps via Web Audio… Listen.');
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AC();
+      if (ctx.state === 'suspended') await ctx.resume();
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => makeBeep(ctx), i * 400);
+      }
+      setTimeout(() => {
+        showResult('test1Result', 'info', 'Done. Heard nothing on speaker? That\'s the iOS bug — expected. Heard them? You\'re probably on headphones.');
+      }, 1500);
+    } catch (e) {
+      showResult('test1Result', 'no', 'Error: ' + e.message);
+    }
+  });
+
+  // --- Test 2: HTMLAudio alone ---
+  $('test2Btn').addEventListener('click', async () => {
+    showResult('test2Result', 'info', 'Playing tone via HTMLAudioElement…');
+    try {
+      const url = await buildAudibleTone();
+      const a = new Audio();
+      a.setAttribute('playsinline', '');
+      a.src = url;
+      await a.play();
+      setTimeout(() => {
+        a.pause();
+        showResult('test2Result', 'ok', 'Tone finished. Should have been audible on speaker.');
+      }, 2500);
+    } catch (e) {
+      showResult('test2Result', 'no', 'Error: ' + e.message);
+    }
+  });
+
+  let audibleToneUrl = null;
+  async function buildAudibleTone() {
+    if (audibleToneUrl) return audibleToneUrl;
+    const SR = 44100;
+    const DUR = 2;
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const ctx = new OAC(1, SR * DUR, SR);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 440;
+    gain.gain.value = 0.3;
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(0); osc.stop(DUR);
+    const buf = await ctx.startRendering();
+    audibleToneUrl = URL.createObjectURL(bufferToWavBlob(buf));
+    return audibleToneUrl;
+  }
+
+  // --- Test 3: HTMLAudio + Web Audio layered (AudioContext created up front) ---
+  let test3Ctx = null;
+  const bgAudio = $('bgAudio');
+
+  $('test3Btn').addEventListener('click', async () => {
+    showResult('test3Result', 'info', 'Starting backing track + Web Audio beep on top…');
+    try {
+      // AudioContext created up front (iOS spec: needs a user-gesture path).
+      if (!test3Ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        test3Ctx = new AC();
+      }
+      if (test3Ctx.state === 'suspended') await test3Ctx.resume();
+
+      const url = await buildBgTrack();
+      bgAudio.src = url;
+      bgAudio.volume = 1;
+      await bgAudio.play();
+
+      // Fire a Web Audio beep. If iOS honors the audio element's speaker
+      // route, we should hear it layered on top. Fire 3 for clarity.
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => makeBeep(test3Ctx), i * 400 + 100);
+      }
+
+      $('test3Stop').disabled = false;
+      setTimeout(() => {
+        showResult('test3Result', 'info', 'Heard beeps layered on top of the low-hum backing track? → hybrid engine is viable (v48 candidate). Heard only the hum? → bug persists, v47 is the ceiling. Tap Stop when ready.');
+      }, 1800);
+    } catch (e) {
+      showResult('test3Result', 'no', 'Error: ' + e.message);
+    }
+  });
+  $('test3Stop').addEventListener('click', () => {
+    bgAudio.pause();
+    bgAudio.currentTime = 0;
+    $('test3Stop').disabled = true;
+  });
+
+  // --- Test 4: Delayed AudioContext creation ---
+  let test4Ctx = null;
+  $('test4Btn').addEventListener('click', async () => {
+    showResult('test4Result', 'info', 'Starting backing track first, then creating AudioContext…');
+    try {
+      const url = await buildBgTrack();
+      bgAudio.src = url;
+      bgAudio.volume = 1;
+      await bgAudio.play();
+
+      // Only now (after bgAudio.play resolves) create the AudioContext.
+      await new Promise(r => setTimeout(r, 200));  // let the audio pipeline settle
+
+      if (!test4Ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        test4Ctx = new AC();
+      }
+      if (test4Ctx.state === 'suspended') await test4Ctx.resume();
+
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => makeBeep(test4Ctx), i * 400);
+      }
+
+      $('test4Stop').disabled = false;
+      setTimeout(() => {
+        showResult('test4Result', 'info', 'Same question as Test 3. Sometimes iOS behaves differently depending on whether the AudioContext is created before or after the audio element starts.');
+      }, 1800);
+    } catch (e) {
+      showResult('test4Result', 'no', 'Error: ' + e.message);
+    }
+  });
+  $('test4Stop').addEventListener('click', () => {
+    bgAudio.pause();
+    bgAudio.currentTime = 0;
+    $('test4Stop').disabled = true;
+  });
+  </script>
+</body>
+</html>
