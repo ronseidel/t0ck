@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>hybrid-edge-test — 0fam / t0ck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #F9F9F9;
+      --ink: #034D32;
+      --accent: #028454;
+      --accent-bg: #E4F3EE;
+      --border: #C0DDD4;
+      --mint: #00BD78;
+      --muted: rgba(3, 77, 50, 0.6);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a1410;
+        --ink: #E4F3EE;
+        --accent: #00BD78;
+        --accent-bg: #0f2a20;
+        --border: #1e3a2e;
+        --mint: #00BD78;
+        --muted: rgba(228, 243, 238, 0.55);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { background: var(--bg); color: var(--ink); margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      padding: 24px 18px 40px;
+      max-width: 560px;
+      margin: 0 auto;
+      -webkit-font-smoothing: antialiased;
+    }
+    .brand {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-family: 'Space Mono', monospace;
+      font-size: 20px;
+      margin: 0 0 4px 0;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+    .test-block {
+      background: var(--accent-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .test-num {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .test-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0 0 6px 0;
+    }
+    .test-body {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--ink);
+      margin-bottom: 12px;
+    }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button.act {
+      padding: 11px 14px;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 7px;
+      cursor: pointer;
+      font-weight: 700;
+      -webkit-tap-highlight-color: transparent;
+      flex: 1;
+      min-width: 110px;
+    }
+    button.act.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--border);
+    }
+    button.act:active { transform: scale(0.98); }
+    button.act:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+    .status {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 10px;
+      min-height: 18px;
+    }
+    .status strong { color: var(--accent); }
+    .loop-readout {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 6px;
+      line-height: 1.6;
+    }
+    .loop-readout .v { color: var(--ink); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="brand">0fam / t0ck</div>
+  <h1>hybrid-edge-test</h1>
+  <div class="sub">Confirms that the hybrid engine (Web Audio on top of silent HTMLAudioElement) survives stop/restart and silent-track looping.</div>
+
+  <div class="test-block">
+    <div class="test-num">Test A</div>
+    <h2 class="test-title">Start → Stop → Start (fresh speaker route)</h2>
+    <div class="test-body">
+      Plays the metronome for 3 seconds (Web Audio clicks on top of silent backing track), stops
+      everything, waits 2 seconds, then starts again. If you hear clicks in both the first AND
+      second play phase, the speaker route re-establishes cleanly. If the second phase is silent,
+      we need to keep the backing track running even when "stopped."
+    </div>
+    <div class="actions">
+      <button class="act" id="testABtn">Run Test A</button>
+    </div>
+    <div class="status" id="statusA">—</div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-num">Test B</div>
+    <h2 class="test-title">Long loop — Web Audio stability across silent-track boundaries</h2>
+    <div class="test-body">
+      Plays continuously for 30 seconds. Silent backing track is only 3 seconds long, so it loops
+      roughly 10 times during the test. Web Audio fires a steady 120 BPM click the entire time.
+      <strong>Listen for any glitch in the click timing</strong> when the silent track loops —
+      the backing track's loop gap shouldn't matter (our audio is synthesized independently), but
+      worth confirming. The readout below tracks every loop boundary the browser reports.
+    </div>
+    <div class="actions">
+      <button class="act" id="testBBtn">Start 30s Test</button>
+      <button class="act secondary" id="testBStop" disabled>Stop</button>
+    </div>
+    <div class="status" id="statusB">—</div>
+    <div class="loop-readout" id="loopReadout"></div>
+  </div>
+
+  <div class="test-block">
+    <div class="test-num">Test C</div>
+    <h2 class="test-title">Background-playing backing track (always-on variant)</h2>
+    <div class="test-body">
+      Different strategy: start the silent backing track once, never stop it. When user taps
+      "Play Clicks," we only start/stop the Web Audio clicks. The silent track runs continuously
+      regardless of metronome state. This should be the most bulletproof approach if Test A fails.
+    </div>
+    <div class="actions">
+      <button class="act" id="testCInit">Init Silent Track</button>
+      <button class="act secondary" id="testCPlay" disabled>Play Clicks</button>
+      <button class="act secondary" id="testCPause" disabled>Pause Clicks</button>
+    </div>
+    <div class="status" id="statusC">—</div>
+  </div>
+
+  <audio id="bgAudio" preload="auto" playsinline loop></audio>
+
+  <script>
+  /*
+    hybrid-edge-test-20260424-01.html
+
+    Two questions, three tests:
+
+    Q1: If we start the silent HTMLAudioElement, stop it (to match user
+        pressing "Stop" on metronome), then start it again for the next
+        session — does Web Audio still route to the speaker on the second
+        session? Or does iOS only grant Web Audio speaker access during
+        the single audio-element "session" that originally opened it?
+
+        Test A covers this directly. Test C covers the fallback strategy
+        of never stopping the silent track.
+
+    Q2: Does the silent backing track's loop boundary (where the audio
+        element wraps back to 0) cause any stutter in Web Audio output?
+        Should be "no" because Web Audio has its own clock independent of
+        HTMLAudioElement, but confirming matters before we commit v48.
+
+        Test B covers this.
+  */
+
+  const $ = id => document.getElementById(id);
+
+  // --- Dark mode ---
+  (function applyTheme() {
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const bg = dark ? '#0a1410' : '#F9F9F9';
+    const ink = dark ? '#E4F3EE' : '#034D32';
+    document.documentElement.style.backgroundColor = bg;
+    document.documentElement.style.color = ink;
+    document.body.style.backgroundColor = bg;
+    document.body.style.color = ink;
+  })();
+
+  // --- Build a 3-second silent-ish backing track once, reuse ---
+  let bgUrl = null;
+  async function buildBgTrack() {
+    if (bgUrl) return bgUrl;
+    const SR = 44100;
+    const DUR = 3;
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const ctx = new OAC(1, SR * DUR, SR);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 60;
+    gain.gain.value = 0.002;  // inaudible on phone speakers
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(0); osc.stop(DUR);
+    const buf = await ctx.startRendering();
+    bgUrl = URL.createObjectURL(bufferToWavBlob(buf));
+    return bgUrl;
+  }
+
+  function bufferToWavBlob(audioBuffer) {
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    const buffer = new ArrayBuffer(44 + length * 2);
+    const view = new DataView(buffer);
+    let p = 0;
+    function writeStr(s) { for (let i = 0; i < s.length; i++) view.setUint8(p++, s.charCodeAt(i)); }
+    function writeU32(n) { view.setUint32(p, n, true); p += 4; }
+    function writeU16(n) { view.setUint16(p, n, true); p += 2; }
+    writeStr('RIFF'); writeU32(36 + length * 2); writeStr('WAVE');
+    writeStr('fmt '); writeU32(16); writeU16(1); writeU16(1);
+    writeU32(sampleRate); writeU32(sampleRate * 2); writeU16(2); writeU16(16);
+    writeStr('data'); writeU32(length * 2);
+    const channel = audioBuffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      const s = Math.max(-1, Math.min(1, channel[i]));
+      view.setInt16(p, s < 0 ? s * 0x8000 : s * 0x7FFF, true); p += 2;
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  const bgAudio = $('bgAudio');
+
+  // --- Web Audio click generator ---
+  let sharedCtx = null;
+  function getCtx() {
+    if (!sharedCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      sharedCtx = new AC();
+    }
+    if (sharedCtx.state === 'suspended') sharedCtx.resume();
+    return sharedCtx;
+  }
+
+  function fireClick(ctx, time) {
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1000, time);
+    osc.connect(env).connect(ctx.destination);
+    env.gain.setValueAtTime(0.0001, time);
+    env.gain.linearRampToValueAtTime(0.45, time + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+    osc.start(time);
+    osc.stop(time + 0.05);
+  }
+
+  // Simple interval-based click scheduler for the tests — not lookahead
+  // based. Good enough to verify timing behavior without obscuring
+  // loop-boundary artifacts.
+  function startClicking(bpm) {
+    const ctx = getCtx();
+    const intervalSec = 60 / bpm;
+    let nextTime = ctx.currentTime + 0.1;
+    const stepId = setInterval(() => {
+      while (nextTime < ctx.currentTime + 0.2) {
+        fireClick(ctx, nextTime);
+        nextTime += intervalSec;
+      }
+    }, 50);
+    return stepId;
+  }
+
+  // ---------------- Test A ----------------
+  $('testABtn').addEventListener('click', async () => {
+    const btn = $('testABtn');
+    btn.disabled = true;
+    const s = $('statusA');
+
+    try {
+      s.innerHTML = '<strong>Phase 1:</strong> starting backing track + clicks…';
+      const url = await buildBgTrack();
+      bgAudio.src = url;
+      bgAudio.volume = 1;
+      await bgAudio.play();
+      const tick1 = startClicking(120);
+
+      await new Promise(r => setTimeout(r, 3000));
+
+      s.innerHTML = '<strong>Stopping everything…</strong> (should be silent for 2s)';
+      clearInterval(tick1);
+      bgAudio.pause();
+      bgAudio.currentTime = 0;
+
+      await new Promise(r => setTimeout(r, 2000));
+
+      s.innerHTML = '<strong>Phase 2:</strong> restarting backing track + clicks…';
+      await bgAudio.play();
+      const tick2 = startClicking(120);
+
+      await new Promise(r => setTimeout(r, 3000));
+
+      clearInterval(tick2);
+      bgAudio.pause();
+      bgAudio.currentTime = 0;
+
+      s.innerHTML = '<strong>Done.</strong> Did you hear clicks in BOTH Phase 1 and Phase 2? If yes, speaker route survives stop/restart. If Phase 2 was silent, we need Test C\'s always-on strategy.';
+    } catch (err) {
+      s.innerHTML = 'Error: ' + err.message;
+    }
+    btn.disabled = false;
+  });
+
+  // ---------------- Test B ----------------
+  let testBTickId = null;
+  let testBStartTime = null;
+  let loopCount = 0;
+
+  $('testBBtn').addEventListener('click', async () => {
+    const s = $('statusB');
+    const readout = $('loopReadout');
+    loopCount = 0;
+    readout.innerHTML = '';
+
+    try {
+      const url = await buildBgTrack();
+      bgAudio.src = url;
+      bgAudio.volume = 1;
+
+      // Log every loop boundary. 'seeked' fires when currentTime jumps,
+      // but loop natively doesn't fire that. 'timeupdate' can track wraparounds.
+      let lastTime = 0;
+      const timeHandler = () => {
+        const now = bgAudio.currentTime;
+        if (now < lastTime - 0.5) {  // wrap detected
+          loopCount++;
+          const entry = document.createElement('div');
+          entry.innerHTML = '<span class="v">Loop #' + loopCount + '</span> at ' + Math.round((performance.now() - testBStartTime) / 1000) + 's — did you hear a click timing glitch?';
+          readout.insertBefore(entry, readout.firstChild);
+        }
+        lastTime = now;
+      };
+      bgAudio.addEventListener('timeupdate', timeHandler);
+
+      s.innerHTML = '<strong>Running 30s test</strong> at 120 BPM. Listen for glitches at loop boundaries (every ~3s).';
+      testBStartTime = performance.now();
+      await bgAudio.play();
+      testBTickId = startClicking(120);
+      $('testBStop').disabled = false;
+      $('testBBtn').disabled = true;
+
+      setTimeout(() => {
+        clearInterval(testBTickId);
+        testBTickId = null;
+        bgAudio.pause();
+        bgAudio.currentTime = 0;
+        bgAudio.removeEventListener('timeupdate', timeHandler);
+        s.innerHTML = '<strong>Done.</strong> Heard clean 120 BPM clicks for the full 30s? → Web Audio clock is independent of the backing track\'s loop boundaries. Hybrid engine is safe to build.';
+        $('testBStop').disabled = true;
+        $('testBBtn').disabled = false;
+      }, 30000);
+    } catch (err) {
+      s.innerHTML = 'Error: ' + err.message;
+    }
+  });
+  $('testBStop').addEventListener('click', () => {
+    if (testBTickId) clearInterval(testBTickId);
+    testBTickId = null;
+    bgAudio.pause();
+    bgAudio.currentTime = 0;
+    $('statusB').innerHTML = 'Stopped early.';
+    $('testBStop').disabled = true;
+    $('testBBtn').disabled = false;
+  });
+
+  // ---------------- Test C ----------------
+  let testCClickId = null;
+  let testCInitialized = false;
+
+  $('testCInit').addEventListener('click', async () => {
+    try {
+      const url = await buildBgTrack();
+      bgAudio.src = url;
+      bgAudio.volume = 1;
+      await bgAudio.play();
+      // Also wake up the AudioContext while we're in a user gesture.
+      getCtx();
+      testCInitialized = true;
+      $('testCInit').disabled = true;
+      $('testCPlay').disabled = false;
+      $('statusC').innerHTML = '<strong>Backing track running.</strong> You should hear nothing (it\'s silent). Click Play Clicks.';
+    } catch (err) {
+      $('statusC').innerHTML = 'Error: ' + err.message;
+    }
+  });
+  $('testCPlay').addEventListener('click', () => {
+    if (!testCInitialized) return;
+    testCClickId = startClicking(120);
+    $('testCPlay').disabled = true;
+    $('testCPause').disabled = false;
+    $('statusC').innerHTML = '<strong>Clicks firing.</strong> Try pausing and resuming a few times — clicks should start and stop instantly, backing track keeps running.';
+  });
+  $('testCPause').addEventListener('click', () => {
+    if (testCClickId) { clearInterval(testCClickId); testCClickId = null; }
+    $('testCPlay').disabled = false;
+    $('testCPause').disabled = true;
+    $('statusC').innerHTML = '<strong>Clicks paused.</strong> Backing track still running. Click Play Clicks to resume — no lag expected.';
+  });
+  </script>
+</body>
+</html>
