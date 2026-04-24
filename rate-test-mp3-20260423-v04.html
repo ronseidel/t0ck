@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>rate-test-mp3 — 0fam / t0ck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #F9F9F9;
+      --ink: #034D32;
+      --accent: #028454;
+      --accent-bg: #E4F3EE;
+      --border: #C0DDD4;
+      --mint: #00BD78;
+      --dim: rgba(3, 77, 50, 0.6);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a1410;
+        --ink: #E4F3EE;
+        --accent: #00BD78;
+        --accent-bg: #0f2a20;
+        --border: #1e3a2e;
+        --mint: #00BD78;
+        --dim: rgba(228, 243, 238, 0.55);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      background: var(--bg);
+      color: var(--ink);
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      padding: 28px 20px 40px;
+      max-width: 520px;
+      margin: 0 auto;
+      -webkit-font-smoothing: antialiased;
+    }
+    .brand {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+    h1 {
+      font-family: 'Space Mono', monospace;
+      font-size: 22px;
+      margin: 0 0 6px 0;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .sub {
+      font-size: 13px;
+      color: var(--dim);
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+    .panel {
+      background: var(--accent-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 20px;
+      margin-bottom: 14px;
+    }
+    .loading { text-align: center; padding: 30px 20px; }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 18px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+    }
+    .loading-error {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: #c94f3e;
+      line-height: 1.5;
+      padding: 12px;
+      background: rgba(201, 79, 62, 0.08);
+      border-radius: 6px;
+      margin-top: 12px;
+      text-align: left;
+    }
+    .bpm-display { text-align: center; padding: 6px 0 14px; }
+    .bpm {
+      font-family: 'Space Mono', monospace;
+      font-size: 72px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+    }
+    .bpm-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      color: var(--accent);
+      margin-top: 6px;
+    }
+    .pulse-row {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      margin: 4px 0 20px;
+    }
+    .dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background 60ms ease, transform 60ms ease;
+    }
+    .dot.active { background: var(--mint); transform: scale(1.35); }
+    .dot.downbeat.active { background: var(--accent); transform: scale(1.5); }
+
+    .slider-block { margin-bottom: 18px; }
+    .slider-block:last-child { margin-bottom: 4px; }
+    .rate-row {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+    .rate-label { color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
+    .rate-value { font-weight: 700; color: var(--accent); }
+
+    .base-chips {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+    }
+    .base-chip {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 6px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 80ms ease, color 80ms ease;
+    }
+    .base-chip.active {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+    }
+    .base-chip:not(.active):hover { background: var(--border); }
+
+    input[type=range] {
+      width: 100%;
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      margin: 0;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+    }
+    input[type=range]::-moz-range-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 26px; height: 26px;
+      background: var(--accent);
+      border-radius: 50%;
+      margin-top: -10px;
+      cursor: pointer;
+      border: 2px solid var(--bg);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 22px; height: 22px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid var(--bg);
+    }
+    .ticks {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--dim);
+      margin-top: 6px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    button {
+      flex: 1;
+      padding: 15px 10px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 700;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--border);
+    }
+    button.rerender {
+      background: var(--ink);
+      color: var(--bg);
+    }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 2px 0;
+      font-size: 13px;
+      border-top: 1px solid var(--border);
+      margin-top: 16px;
+    }
+    .toggle-row label { cursor: pointer; font-family: 'Space Mono', monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .toggle-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+
+    .dirty-banner {
+      display: none;
+      padding: 10px 12px;
+      background: #FFF4DB;
+      color: #6B4A00;
+      border: 1px solid #F2D88E;
+      border-radius: 8px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      margin-top: 14px;
+      text-align: center;
+    }
+    .dirty-banner.show { display: block; }
+
+    .diag {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--dim);
+      line-height: 1.6;
+      padding: 10px 12px;
+      background: var(--accent-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-top: 12px;
+    }
+    .diag-row { display: flex; justify-content: space-between; }
+    .diag-val { color: var(--ink); }
+
+    .notes {
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--ink);
+      padding: 14px 16px;
+      background: var(--accent-bg);
+      border-left: 3px solid var(--accent);
+      border-radius: 4px;
+      margin-top: 14px;
+    }
+    .notes strong { color: var(--accent); font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; display: block; margin-bottom: 6px; }
+    .notes ul { margin: 6px 0 0; padding-left: 18px; }
+    .notes li { margin-bottom: 4px; }
+    .notes code { font-family: 'Space Mono', monospace; font-size: 11px; background: rgba(3,77,50,0.08); padding: 1px 5px; border-radius: 3px; }
+  </style>
+</head>
+<body style="background: #F9F9F9; color: #034D32; margin: 0;">
+  <div class="brand">0fam / t0ck</div>
+  <h1>rate-test-mp3</h1>
+  <div class="sub">Sweep base&nbsp;BPM, click&nbsp;length, and playback&nbsp;rate. Each render = 10&nbsp;min.</div>
+
+  <div class="panel" id="loadingPanel">
+    <div class="loading">
+      <div class="spinner" id="spinner"></div>
+      <div class="loading-text" id="loadingText">initializing...</div>
+      <div class="loading-error" id="loadingError" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="playerPanel" style="display:none;">
+    <div class="bpm-display">
+      <div class="bpm" id="bpmDisplay">160</div>
+      <div class="bpm-label">effective BPM</div>
+    </div>
+
+    <div class="pulse-row" id="pulseRow">
+      <div class="dot downbeat" id="d0"></div>
+      <div class="dot" id="d1"></div>
+      <div class="dot" id="d2"></div>
+      <div class="dot" id="d3"></div>
+    </div>
+
+    <div class="slider-block">
+      <div class="rate-row">
+        <span class="rate-label">base tempo</span>
+        <span class="rate-value" id="baseValue">160 BPM</span>
+      </div>
+      <div class="base-chips" id="baseChips">
+        <button class="base-chip" data-base="80">80</button>
+        <button class="base-chip active" data-base="160">160</button>
+        <button class="base-chip" data-base="240">240</button>
+        <button class="base-chip" data-base="320">320</button>
+      </div>
+    </div>
+
+    <div class="slider-block">
+      <div class="rate-row">
+        <span class="rate-label">playback rate</span>
+        <span class="rate-value" id="rateValue">1.00×</span>
+      </div>
+      <input type="range" id="rateSlider" min="0.05" max="1.00" step="0.05" value="1.00">
+      <div class="ticks">
+        <span>0.05×</span>
+        <span>0.50×</span>
+        <span>1.00×</span>
+      </div>
+    </div>
+
+    <div class="slider-block">
+      <div class="rate-row">
+        <span class="rate-label">click length</span>
+        <span class="rate-value" id="lenValue">10 ms</span>
+      </div>
+      <input type="range" id="lenSlider" min="5" max="80" step="5" value="10">
+      <div class="ticks">
+        <span>5 ms</span>
+        <span>40 ms</span>
+        <span>80 ms</span>
+      </div>
+    </div>
+
+    <div class="dirty-banner" id="dirtyBanner">Config changed — tap Re-render to apply</div>
+
+    <div class="controls">
+      <button id="playBtn">Play</button>
+      <button id="stopBtn" class="secondary" disabled>Stop</button>
+    </div>
+    <div class="controls" style="margin-top: 10px;">
+      <button id="rerenderBtn" class="rerender" disabled>Re-render</button>
+    </div>
+
+    <div class="toggle-row">
+      <label for="preservePitch">preservesPitch</label>
+      <input type="checkbox" id="preservePitch">
+    </div>
+
+    <div class="diag" id="diag">
+      <div class="diag-row"><span>rendered base</span><span class="diag-val" id="dBase">160 BPM</span></div>
+      <div class="diag-row"><span>rendered click len</span><span class="diag-val" id="dLen">10 ms</span></div>
+      <div class="diag-row"><span>file size</span><span class="diag-val" id="dFile">—</span></div>
+      <div class="diag-row"><span>render time</span><span class="diag-val" id="dRen">—</span></div>
+      <div class="diag-row"><span>encode time</span><span class="diag-val" id="dEnc">—</span></div>
+      <div class="diag-row"><span>currentTime</span><span class="diag-val" id="dCur">0.00</span></div>
+    </div>
+
+    <div class="notes">
+      <strong>Test protocol — v35 lockdown</strong>
+      <ul>
+        <li>Current default: 160 base, 10 ms click, preservesPitch off. Confirm 0.25× still holds.</li>
+        <li>Switch base to 320 → re-render → sweep rate. At 0.25× you're at 80 BPM. Clean?</li>
+        <li>Same at 240 base (the fast-jazz cap most metronomes stop at).</li>
+        <li>Try 80 base + 0.5× = 40 BPM, slow-practice territory — is it the same or different floor?</li>
+        <li>If every base-length-rate combo holds cleanly down to 0.25×, v35 uses two bases (160 + 320). If only 160 holds and 320 gets weird, we need to investigate.</li>
+      </ul>
+    </div>
+  </div>
+
+  <audio id="audio" preload="auto" playsinline></audio>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+  <script>
+  /*
+    rate-test-mp3-20260423-04.html
+
+    v04 (2026-04-23) — selectable base BPM
+      - Base tempo chip selector: 80 / 160 / 240 / 320.
+      - Default click length dropped to 10 ms (winner from v03 testing).
+      - Default preservesPitch OFF (winner from v03 testing).
+      - Re-render triggers on ANY config change (base OR click length).
+      - Effective BPM display = base × playbackRate, so you always see real tempo.
+      - Also serves as a standalone tool: render clicks at any tempo, play
+        back at any rate — basically a tempo-variable click generator.
+
+    v03 (2026-04-23) — combined rate + click-length test
+    v02 (2026-04-23) — direct Float32Array sample gen (fix Chrome hang)
+    v01 (2026-04-23) — initial MP3 render + playback
+
+    Purpose: lock v35 architecture.
+      - If 10ms + preservesPitch-off holds 0.25× floor at ALL bases: two-base plan.
+      - If 320 base has issues 160 doesn't: investigate before committing.
+      - If any base holds below 0.25×: one-base plan still possible.
+  */
+
+  const DURATION_SEC = 600;       // 10 min
+  const SAMPLE_RATE = 44100;
+  const DOWNBEAT_FREQ = 2000;     // Hz
+  const REGULAR_FREQ = 1500;      // Hz
+
+  const $ = id => document.getElementById(id);
+
+  // --- Dark mode ---
+  function applyTheme() {
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const bg = dark ? '#0a1410' : '#F9F9F9';
+    const ink = dark ? '#E4F3EE' : '#034D32';
+    document.documentElement.style.backgroundColor = bg;
+    document.documentElement.style.color = ink;
+    document.body.style.backgroundColor = bg;
+    document.body.style.color = ink;
+  }
+  applyTheme();
+  try {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+  } catch (e) { /* older Safari */ }
+
+  // --- Render clicks at given base BPM and click length ---
+  async function renderClicks(baseBpm, clickMs) {
+    const beatInterval = 60 / baseBpm;
+    const totalBeats = Math.floor(DURATION_SEC / beatInterval);
+    const totalSamples = SAMPLE_RATE * DURATION_SEC;
+    const samples = new Float32Array(totalSamples);
+
+    const clickLen = Math.max(1, Math.floor((clickMs / 1000) * SAMPLE_RATE));
+    const envRate = 4.5 / (clickMs / 1000);
+
+    const downbeatClick = new Float32Array(clickLen);
+    const regularClick = new Float32Array(clickLen);
+    const TWO_PI = Math.PI * 2;
+    for (let i = 0; i < clickLen; i++) {
+      const t = i / SAMPLE_RATE;
+      const env = Math.exp(-t * envRate);
+      downbeatClick[i] = 0.85 * Math.sin(TWO_PI * DOWNBEAT_FREQ * t) * env;
+      regularClick[i]  = 0.55 * Math.sin(TWO_PI * REGULAR_FREQ * t) * env;
+    }
+
+    const YIELD_EVERY = 200;
+    for (let i = 0; i < totalBeats; i++) {
+      const startSample = Math.floor(i * beatInterval * SAMPLE_RATE);
+      const click = (i % 4 === 0) ? downbeatClick : regularClick;
+      const maxJ = Math.min(clickLen, totalSamples - startSample);
+      for (let j = 0; j < maxJ; j++) {
+        samples[startSample + j] = click[j];
+      }
+      if (i > 0 && i % YIELD_EVERY === 0) {
+        const progress = Math.floor((i / totalBeats) * 100);
+        $('loadingText').textContent = `rendering ${baseBpm} BPM / ${clickMs}ms... ${progress}%`;
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+    return samples;
+  }
+
+  async function encodeMP3(channelData) {
+    if (typeof lamejs === 'undefined') {
+      throw new Error('lamejs did not load. Check network / adblocker for cdnjs.cloudflare.com.');
+    }
+    const samples = new Int16Array(channelData.length);
+    for (let i = 0; i < channelData.length; i++) {
+      const s = Math.max(-1, Math.min(1, channelData[i]));
+      samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    const mp3encoder = new lamejs.Mp3Encoder(1, SAMPLE_RATE, 128);
+    const mp3Data = [];
+    const blockSize = 1152;
+    const YIELD_EVERY = 400;
+    let blockCount = 0;
+
+    for (let i = 0; i < samples.length; i += blockSize) {
+      const chunk = samples.subarray(i, i + blockSize);
+      const mp3buf = mp3encoder.encodeBuffer(chunk);
+      if (mp3buf.length > 0) mp3Data.push(mp3buf);
+      blockCount++;
+      if (blockCount % YIELD_EVERY === 0) {
+        const progress = Math.floor((i / samples.length) * 100);
+        $('loadingText').textContent = `encoding mp3... ${progress}%`;
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+    const end = mp3encoder.flush();
+    if (end.length > 0) mp3Data.push(end);
+    return new Blob(mp3Data, { type: 'audio/mp3' });
+  }
+
+  const audio = $('audio');
+  let isPlaying = false;
+  let rafId = null;
+  let currentBlobUrl = null;
+
+  // State
+  let selectedBase = 160;
+  let selectedLen = 10;
+  let renderedBase = null;
+  let renderedLen = null;
+
+  async function renderAndLoad(baseBpm, clickMs) {
+    const renderStart = performance.now();
+    const samples = await renderClicks(baseBpm, clickMs);
+    const renderMs = performance.now() - renderStart;
+
+    $('loadingText').textContent = 'encoding mp3... 0%';
+    await new Promise(r => setTimeout(r, 30));
+
+    const encodeStart = performance.now();
+    const mp3Blob = await encodeMP3(samples);
+    const encodeMs = performance.now() - encodeStart;
+
+    if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+    currentBlobUrl = URL.createObjectURL(mp3Blob);
+    audio.src = currentBlobUrl;
+    audio.load();
+
+    $('dFile').textContent = (mp3Blob.size / 1024 / 1024).toFixed(2) + ' MB';
+    $('dRen').textContent = (renderMs / 1000).toFixed(2) + ' s';
+    $('dEnc').textContent = (encodeMs / 1000).toFixed(2) + ' s';
+    $('dBase').textContent = baseBpm + ' BPM';
+    $('dLen').textContent = clickMs + ' ms';
+    renderedBase = baseBpm;
+    renderedLen = clickMs;
+    updateEffectiveBpm();
+  }
+
+  async function boot() {
+    try {
+      $('loadingText').textContent = 'rendering 160 BPM / 10ms... 0%';
+      await renderAndLoad(160, 10);
+      $('loadingPanel').style.display = 'none';
+      $('playerPanel').style.display = 'block';
+    } catch (err) {
+      $('spinner').style.display = 'none';
+      $('loadingText').textContent = 'failed to load';
+      const errEl = $('loadingError');
+      errEl.textContent = (err && err.message) ? err.message : String(err);
+      errEl.style.display = 'block';
+      console.error(err);
+    }
+  }
+  boot();
+
+  // --- Dirty state tracking ---
+  function updateDirty() {
+    const dirty = (selectedBase !== renderedBase) || (selectedLen !== renderedLen);
+    $('dirtyBanner').classList.toggle('show', dirty);
+    $('rerenderBtn').disabled = !dirty;
+  }
+
+  // --- Base chip selector ---
+  document.querySelectorAll('.base-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.base-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      selectedBase = parseInt(chip.dataset.base, 10);
+      $('baseValue').textContent = selectedBase + ' BPM';
+      updateDirty();
+    });
+  });
+
+  // --- Rate slider ---
+  const slider = $('rateSlider');
+  slider.addEventListener('input', () => {
+    const rate = parseFloat(slider.value);
+    audio.playbackRate = rate;
+    $('rateValue').textContent = rate.toFixed(2) + '×';
+    updateEffectiveBpm();
+  });
+
+  function updateEffectiveBpm() {
+    const rate = parseFloat(slider.value);
+    $('bpmDisplay').textContent = Math.round((renderedBase || selectedBase) * rate);
+  }
+
+  // --- Click-length slider ---
+  const lenSlider = $('lenSlider');
+  lenSlider.addEventListener('input', () => {
+    selectedLen = parseInt(lenSlider.value, 10);
+    $('lenValue').textContent = selectedLen + ' ms';
+    updateDirty();
+  });
+
+  // --- Re-render ---
+  $('rerenderBtn').addEventListener('click', async () => {
+    if (isPlaying) {
+      audio.pause();
+      endPlayback();
+    }
+    $('playerPanel').style.display = 'none';
+    $('loadingPanel').style.display = 'block';
+    $('loadingError').style.display = 'none';
+    $('spinner').style.display = 'block';
+    $('loadingText').textContent = `rendering ${selectedBase} BPM / ${selectedLen}ms... 0%`;
+    try {
+      await renderAndLoad(selectedBase, selectedLen);
+      $('loadingPanel').style.display = 'none';
+      $('playerPanel').style.display = 'block';
+      updateDirty();
+    } catch (err) {
+      $('spinner').style.display = 'none';
+      $('loadingText').textContent = 're-render failed';
+      $('loadingError').textContent = (err && err.message) ? err.message : String(err);
+      $('loadingError').style.display = 'block';
+      console.error(err);
+    }
+  });
+
+  // --- preservesPitch (default OFF based on v03 testing) ---
+  function setPreservesPitch(on) {
+    audio.preservesPitch = on;
+    audio.mozPreservesPitch = on;
+    audio.webkitPreservesPitch = on;
+  }
+  setPreservesPitch(false);
+  $('preservePitch').addEventListener('change', (e) => setPreservesPitch(e.target.checked));
+
+  // --- Play / Stop ---
+  $('playBtn').addEventListener('click', () => {
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p && p.catch) p.catch(err => console.error('play failed:', err));
+    isPlaying = true;
+    $('playBtn').disabled = true;
+    $('stopBtn').disabled = false;
+    pulse();
+  });
+  $('stopBtn').addEventListener('click', () => {
+    audio.pause();
+    audio.currentTime = 0;
+    endPlayback();
+  });
+  audio.addEventListener('ended', endPlayback);
+
+  function endPlayback() {
+    isPlaying = false;
+    $('playBtn').disabled = false;
+    $('stopBtn').disabled = true;
+    if (rafId) cancelAnimationFrame(rafId);
+    clearDots();
+    $('dCur').textContent = '0.00';
+  }
+
+  // --- Visual pulse (uses renderedBase, not selectedBase) ---
+  const dots = [$('d0'), $('d1'), $('d2'), $('d3')];
+  let lastBeat = -1;
+  function clearDots() { dots.forEach(d => d.classList.remove('active')); lastBeat = -1; }
+  function pulse() {
+    if (!isPlaying) return;
+    const ct = audio.currentTime;
+    const beatF = ct * renderedBase / 60;
+    const beatIdx = Math.floor(beatF) % 4;
+    if (beatIdx !== lastBeat) {
+      clearDots();
+      dots[beatIdx].classList.add('active');
+      lastBeat = beatIdx;
+    }
+    $('dCur').textContent = ct.toFixed(2);
+    rafId = requestAnimationFrame(pulse);
+  }
+  </script>
+</body>
+</html>
