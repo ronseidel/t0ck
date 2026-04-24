@@ -87,6 +87,23 @@
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* (v50) Branded text selection. Browser default is blue/gray — feels
+     out of place once you've noticed the rest of the palette. Using the
+     accent color at full saturation for the background with the app's
+     bg color for the text reads as an inverted chip rather than a
+     highlight, which is the look the rest of t0ck goes for. ::selection
+     and ::-moz-selection both needed — they can't be combined into one
+     rule because either browser drops the entire rule if it doesn't
+     recognize the pseudo-element. */
+  ::selection {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  ::-moz-selection {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
   /* Branded keyboard-focus rings. :focus-visible fires only for keyboard
      navigation (tab key), not mouse clicks — so the rings don't appear
      after every tap. 2px offset so the ring doesn't hug the element. */
@@ -678,7 +695,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v48 · 20260424</span>
+    <span class="version">v50 · 20260424</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -867,6 +884,8 @@
 // v46 (2026-04-24) — settings changes felt slow on iOS because the swap waited for the next measure boundary of the OLD file. At slow tempos with long measures (60 BPM in 6/8 = 6-second measure), a sound change could take 5+ seconds to take effect. That policy was designed for musical continuity when a user is "playing along" with the metronome, but it's the wrong policy when the user is actually CHANGING settings — they're exploring, not performing. Split the swap policy by change type: sound/sig/sub/accent changes now pass immediate:true to onConfigChange and swap as soon as the target file is available, no measure-boundary wait. Cross-base BPM changes (which still route through onConfigChange via onBpmChange when crossing the 160/320 threshold) keep the measure-boundary behavior, because BPM changes are more likely to happen mid-performance when continuity matters. Extracted the swap body into a performSwap() helper shared between tick() (boundary path) and onConfigChange (immediate path, when target is already cached — shaves another animation frame off perceived latency). Small audible blip on iOS during the pause/src/play transition is accepted as the cost of responsiveness; users exploring sounds rapidly want the change to land, not a smooth phrase transition.
 // v47 (2026-04-24) — subdivision changes still felt slow because Phase 2 pre-renders only covered other sounds at the current config. Subs, accent, and cross-sound × cross-sub combos were never pre-rendered, so every sub change paid full ~4s render cost on first touch. Expanded pre-render coverage to a "neighborhood" concept: all single-axis variants of the current config get queued (other sounds, other subs, other accent) — plus the same neighborhood at the other base on initial boot. Extracted the logic into queueNeighborhoodRenders(config) so it can be called from bootPhases (initial boot) and from performSwap (after every swap, re-centered on the new current config). This means once the user changes, say, sound to Wood, the background queue refills with Wood's neighbors — other subs at Wood, other accent at Wood, etc. — so the next sub change from that position is also instant. Sigs intentionally omitted from the neighborhood (users rarely change sig mid-session; render cost isn't worth speculative coverage). Dedup in enqueue() keeps this safe to call repeatedly. Combined with IDB persistence from v44, the practical effect is: first-ever visit pays up-front render cost for ~14 configs (~50s background work after boot); every subsequent visit has the neighborhood pre-loaded from disk.
 // v48 (2026-04-24) — architectural reset. v47 represented the ceiling of the rendered-file approach on iOS: ~330ms file-swap latency even with aggressive pre-rendering and IDB persistence. Several device tests revealed an escape hatch: if an HTMLAudioElement is playing, iOS WebKit honors Web Audio output on the built-in speaker too. This inverts the architecture. v48 uses the same WebAudioEngine on all platforms (same as v01-v24), with one addition on iOS: a near-silent 3-second WAV playing on loop to keep the speaker route open. Silent track is primed on the very first user interaction anywhere on the page (pointerdown/touchstart/keydown), so by the time the user reaches Play the route is already established. Everything v35-v47 added for the rendered-file approach is removed: RenderedFileEngine, blobDB (IndexedDB persistence), iOS browser-limit notice modal, session-end modal + Continue/Stop flow, boot progress % on Play button, per-sound status dots, render-pending shimmer on segment buttons, catching-up state (dim beats + status text), measure-boundary swap, base-tempo architecture, neighborhood pre-rendering queue, lamejs dependency. BPM range restored to 30-300 (v35-v47 capped at 40-320 due to playbackRate math). No session cap. No file swap latency. Sound/sig/sub/accent/BPM changes are all instant because they're just state reads on the next scheduler tick. The iOS path is now identical to the desktop path in every observable way — the silent backing track is the only architectural difference, and it's invisible. This reverts the code to something very close to v34's shape, with one new iosSpeakerKeepalive module adding ~80 lines. The entire 13-version rendered-file saga collapses to an inlined WAV blob and a single-line listener. Evidence path: audio-switch-test-20260424-01 ruled out multi-element approaches; webaudio-unmute-test-20260424-01 confirmed the HTMLAudio-primes-WebAudio behavior; hybrid-edge-test-20260424-01 confirmed the speaker route survives stop/start cycles and that Web Audio's clock is unaffected by the silent track's loop boundaries.
+// v49 (2026-04-24) — BPM input now selects all on focus, so tapping/clicking into the field lets the user immediately type the new value without backspacing out the current one. Fires on both focus and click (iOS Safari doesn't re-fire focus on a second tap of an already-focused input, so without the click handler re-selection wouldn't work). Wrapped in requestAnimationFrame because iOS's focus event fires before the input is fully selectable; RAF defers to the next frame when .select() actually takes effect.
+// v50 (2026-04-24) — branded text selection. Default browser selection highlight (blue/gray) looks out of place against the accent-green palette, especially now that v49 selects BPM text on every focus. ::selection and ::-moz-selection both set to accent background with bg color text — reads as an inverted chip rather than a standard OS highlight, which matches the visual language of the selected segment buttons. Rules split (can't combine) because browsers drop the entire rule if they don't recognize either pseudo. Uses CSS variables, so dark mode auto-inverts correctly.
 (function () {
   'use strict';
 
@@ -1549,6 +1568,21 @@
   el.bpm.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') el.bpm.blur();
   });
+
+  // (v49) On focus, select all so users can immediately type the new BPM
+  // without backspacing out the old value. iOS Safari has a quirk where
+  // .select() inside a focus handler fires too early (the input isn't
+  // fully focused yet) — wrapping in requestAnimationFrame avoids that.
+  // Also handle click explicitly: on iOS, clicking an already-focused
+  // number input doesn't re-fire focus, so tapping a second time to
+  // re-select wouldn't work without this.
+  function selectBpm() {
+    requestAnimationFrame(() => {
+      try { el.bpm.select(); } catch (e) {}
+    });
+  }
+  el.bpm.addEventListener('focus', selectBpm);
+  el.bpm.addEventListener('click', selectBpm);
 
   el.tap.addEventListener('click', handleTap);
   el.play.addEventListener('click', toggle);
