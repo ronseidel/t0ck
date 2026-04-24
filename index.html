@@ -714,7 +714,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v53 · 20260424</span>
+    <span class="version">v54 · 20260424</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -911,6 +911,7 @@
 // v51 (2026-04-24) — Ron flagged that the BPM input selection was still showing gray on iOS. Investigated: two things overlap on iOS when tapping a number input. (1) The selection-text background WITHIN the input field — which is what v50's ::selection rule was supposed to cover. (2) iOS's native scrubber/magnifier pill that floats on top of number inputs during editing — this is system chrome rendered above the page and cannot be styled from CSS regardless of what we try. The gray in the screenshot was mostly #2, which we can't fix. But to maximize the chance of #1 being green on iOS, added explicit input::selection and textarea::selection rules. The general ::selection rule should cascade into inputs by spec, but some Safari versions don't honor that — belt-and-suspenders here. If BPM selection still looks gray on iOS after v51, it's the system scrubber, not our selection, and nothing in the page's CSS can change it.
 // v52 (2026-04-24) — dropped <input type="number"> in favor of <input type="text" inputmode="numeric" pattern="[0-9]*"> to eliminate iOS's scrubber/magnifier pill overlay that can't be styled. type="text" + inputmode="numeric" gets the same numeric keypad on iOS/Android without the system-chrome scrubber that was causing the gray selection look in v51. Our in-field ::selection now shows green as intended. Trade-offs: (a) lost native HTML5 min/max validation, but we already clamp in setBpm(), so no functional change; (b) lost the browser's up/down stepper arrows, which we never used because we have our own +/- buttons; (c) need to sanitize non-digit input ourselves because type="text" doesn't reject them — added a digit-strip in the input handler for paste/hardware-keyboard edge cases. Added maxlength="3" so the field can't exceed three digits (matches our 300 BPM ceiling). Also set autocomplete="off", autocorrect="off", spellcheck="false" since browsers don't need to suggest completions for a BPM field.
 // v53 (2026-04-24) — iOS was showing an "audio playing" indicator in the system status bar even when the metronome wasn't running. Cause: v48's iosSpeakerKeepalive module started the silent backing track on first user interaction and left it running forever (Option C from the v48 design discussion). That keeps iOS's audio session perpetually active, which lights up the status-bar indicator whenever the user leaves the app. Fix: prime() now pauses the track immediately after the gesture-bound play() resolves — that's enough to establish the speaker route. Added explicit start()/stop() methods that the metronome's start/stop functions now call. Result: silent track only plays while metronome is actually running. Test A from hybrid-edge-test confirmed the speaker route re-establishes cleanly across pause/resume cycles, so this doesn't regress the fundamental fix. Non-iOS platforms are unaffected — they don't reach the keepalive code path.
+// v54 (2026-04-24) — v53 introduced a race: rapid stop/start cycles produced silent runs because the silent track's play() promise was still resolving when WebAudio fired its first click, so the click missed the speaker route. Fixed by deferring the pause by 800ms after stop() is called. If the user starts again within that window (which is what rapid toggling looks like), we cancel the pending timer and never actually pause — the speaker route stays open across the toggle. Long pauses still hit the timeout and pause normally, preserving v53's status-bar fix for the case that actually matters (user walks away from the app for a while). 800ms picked as a balance: long enough to absorb tempo scrubbing, sound exploration, and accidental double-taps; short enough that the status indicator clears reasonably promptly when the user actually walks away. Also added an isPaused check in start() so we don't issue a redundant play() during the grace period.
 (function () {
   'use strict';
 
@@ -1243,6 +1244,19 @@
       return audioEl;
     }
 
+    // Grace period before actually pausing the silent track on stop().
+    // Reason: WebAudio's speaker access on iOS needs the silent track to
+    // be playing when WebAudio fires its first sound. If we pause too
+    // eagerly and the user immediately taps Play again, there's a window
+    // where the silent track's play() is still resolving while WebAudio
+    // is already trying to fire clicks — they end up silent. Waiting a
+    // bit before pausing means rapid stop/start doesn't actually pause
+    // anything (the timer gets cancelled before it fires), so the speaker
+    // route stays open across rapid toggles. Long pauses still pause
+    // eventually, which is when the status-bar indicator matters.
+    let stopTimerId = null;
+    const STOP_GRACE_MS = 800;
+
     return {
       // Called once on first user interaction. Primes the audio pipeline
       // by briefly starting it, then pausing. iOS accepts this as the
@@ -1267,23 +1281,32 @@
         }
       },
       // Called from start() — resume the silent track so Web Audio output
-      // is routed to the speaker. If prime() hasn't been called yet
-      // (shouldn't happen because start() requires a user gesture which
-      // would have triggered prime first), ensureEl() creates it fresh.
+      // is routed to the speaker. v54: cancel any pending stop timer so
+      // we don't pause right after starting in a rapid stop/start cycle.
       start: function () {
-        const a = ensureEl();
-        const p = a.play();
-        if (p && p.catch) p.catch(function () {});
-      },
-      // Called from stop() — pause the silent track. This removes the
-      // "audio playing" indicator from iOS's status bar and stops the
-      // backing track from consuming the audio session. Test A in
-      // hybrid-edge-test confirmed the speaker route re-establishes
-      // cleanly on the next play(), so stopping here is safe.
-      stop: function () {
-        if (audioEl) {
-          try { audioEl.pause(); } catch (e) {}
+        if (stopTimerId) {
+          clearTimeout(stopTimerId);
+          stopTimerId = null;
         }
+        const a = ensureEl();
+        if (a.paused) {
+          const p = a.play();
+          if (p && p.catch) p.catch(function () {});
+        }
+      },
+      // v54: defer the pause by STOP_GRACE_MS. Rapid stop/start cycles
+      // (which happen during BPM tweaking, sound exploration, etc.) won't
+      // actually toggle the audio session — they'll just reset the timer.
+      // Long pauses still hit the timeout and pause normally, restoring
+      // the v53 behavior of clearing the iOS status-bar indicator.
+      stop: function () {
+        if (stopTimerId) clearTimeout(stopTimerId);
+        stopTimerId = setTimeout(function () {
+          if (audioEl) {
+            try { audioEl.pause(); } catch (e) {}
+          }
+          stopTimerId = null;
+        }, STOP_GRACE_MS);
       }
     };
   })();
