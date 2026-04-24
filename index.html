@@ -34,6 +34,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- MP3 encoder for iOS rendered-file audio path. Loaded early so it's ready
+     by the time the render pipeline kicks off. Non-iOS never hits the encode
+     path but the 70KB cost is negligible and keeps the fallback self-contained. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
 <style>
   :root {
     --bg: #F9F9F9;
@@ -165,67 +170,8 @@
     letter-spacing: 0.02em;
   }
 
-  /* Jitter indicator — appears only while the metronome is running. Tiny
-     colored dot: green when precision is good, yellow when marginal, red
-     when the scheduler is struggling. Size + subtle colors keep it from
-     stealing attention; only noticeable if you look for it. */
-  .jitter-dot {
-    display: none;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: transparent;
-    margin-right: -4px;
-    transition: background 200ms;
-  }
-  .jitter-dot.active { display: inline-block; }
-  .jitter-dot.good    { background: var(--mint); }
-  .jitter-dot.marginal { background: #D4A017; }
-  .jitter-dot.bad     { background: #C44536; }
-
-  /* Jitter-stopped alert modal. Separate from the Settings/Help modal
-     component because it's transient, dismissable, and never re-opened. */
-  .jitter-alert {
-    position: fixed; inset: 0; background: rgba(3, 77, 50, 0.28);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 300; padding: 24px;
-    animation: jitter-alert-fade 160ms ease-out;
-  }
-  @keyframes jitter-alert-fade {
-    from { opacity: 0; } to { opacity: 1; }
-  }
-  .jitter-alert-inner {
-    background: var(--bg); color: var(--ink);
-    border: 1px solid var(--border); border-radius: 14px;
-    padding: 24px; max-width: 420px; width: 100%;
-    box-shadow: 0 20px 60px rgba(3, 77, 50, 0.15);
-  }
-  .jitter-alert-title {
-    font-family: 'Space Mono', monospace; font-weight: 700; font-size: 18px;
-    letter-spacing: -0.02em; margin-bottom: 10px; color: var(--ink);
-  }
-  .jitter-alert-body {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-    color: var(--ink);
-    opacity: 0.85;
-    margin-bottom: 20px;
-    text-wrap: pretty;
-    overflow-wrap: anywhere;
-    word-wrap: break-word;
-    hyphens: auto;
-  }
-  .jitter-alert-ok {
-    width: 100%; padding: 12px 16px;
-    font-family: 'Space Mono', monospace; font-weight: 700; font-size: 13px;
-    letter-spacing: 0.04em; text-transform: uppercase;
-    background: var(--accent); color: var(--bg);
-    border: none; border-radius: 10px; cursor: pointer;
-    transition: background 120ms, transform 80ms;
-  }
-  .jitter-alert-ok:hover { background: var(--ink); }
-  .jitter-alert-ok:active { transform: scale(0.98); }
+  /* (v35) Removed jitter-indicator CSS — no longer needed since the
+     rendered-file engine has no JS-observable timing drift. */
 
   .header-meta {
     display: flex;
@@ -296,6 +242,46 @@
   .beat-dot.active.downbeat {
     background: var(--mint);
     border-color: var(--mint);
+  }
+
+  /* (v43/v45) Catching-up state: dim the beat dots + show a status text
+     line above them. The v43 breathing ring was removed — at peak opacity
+     it read as a hard-edged pill-shaped UI element rather than ambient
+     motion. Dim + text is enough. Dots stay at their original position;
+     status text is absolutely positioned above so it doesn't displace
+     them. Extra top margin on .beats-wrap gives the status text room to
+     appear without feeling cramped against the header. */
+  .beats-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 18px;
+    margin-top: 24px;
+  }
+  .beats {
+    transition: opacity 220ms ease;
+  }
+  .beats-wrap.catching-up .beats {
+    opacity: 0.55;
+  }
+  .catch-up-status {
+    position: absolute;
+    bottom: calc(100% + 14px);
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 260ms ease;
+  }
+  .catch-up-status.show {
+    opacity: 0.85;
   }
 
   .bpm-display {
@@ -716,7 +702,163 @@
     .segments { gap: 6px; }
   }
 
-  /* Respect reduced motion */
+  /* ---------- v35 rendered-file engine UI ---------- */
+  /* (v41) Pre-tap sound-status dots removed. The original intent was to
+     signal "this sound is already cached" vs "will take a moment to
+     render," but in practice the dots looked off-brand and previewed state
+     for actions the user hadn't initiated. The .render-pending shimmer
+     on tap is the real feedback — it fires exactly when the user needs
+     it, on the exact button they tapped. Silence is a valid state. */
+
+  /* Disabled-while-rendering / waiting-for-swap state for segment buttons.
+     The button visually activates immediately (state.X is updated in
+     handleSegmentClick so the user sees their tap register), but audio
+     playback won't reflect the change until the next measure boundary,
+     or longer if the file still needs rendering. The shimmer is the
+     feedback that work is happening behind the scenes.
+
+     Color rationale: the selected segment has a solid accent-green fill,
+     so a green-tinted shimmer disappears against it. A translucent
+     LIGHT gradient reads on both backgrounds — bright against the dark
+     accent fill, subtle against the neutral idle background. */
+  .seg.render-pending {
+    cursor: progress;
+    position: relative;
+    overflow: hidden;
+  }
+  .seg.render-pending::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      100deg,
+      transparent 20%,
+      rgba(255, 255, 255, 0.35) 50%,
+      transparent 80%
+    );
+    transform: translateX(-100%);
+    animation: pending-shimmer 1.1s ease-in-out infinite;
+    pointer-events: none;
+    border-radius: inherit;
+    mix-blend-mode: overlay;
+  }
+  @keyframes pending-shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* Notice modal shown once on iOS first-load (and session-end modal reuses
+     the same styling). Uses the v34 .modal chrome but with a centered card
+     instead of the full-screen slide-up. */
+  .notice {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 22, 18, 0.52);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 24px;
+    opacity: 0;
+    transition: opacity 200ms ease;
+  }
+  .notice.open { display: flex; opacity: 1; }
+
+  .notice-card {
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 26px 24px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    text-wrap: pretty;
+  }
+
+  .notice-icon {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  .notice-title {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    margin: 0 0 10px 0;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  .notice-body {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--ink);
+    margin-bottom: 22px;
+  }
+
+  .notice-body p { margin: 0 0 10px 0; }
+  .notice-body p:last-child { margin-bottom: 0; }
+  .notice-body .small {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+  }
+
+  .notice-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .notice-btn {
+    flex: 1;
+    padding: 13px 12px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 120ms ease;
+  }
+  .notice-btn:hover { background: var(--accent-bg); }
+  .notice-btn.primary {
+    background: var(--play-bg);
+    color: var(--play-text);
+    border-color: var(--play-bg);
+  }
+  .notice-btn.primary:hover { filter: brightness(1.08); }
+  .notice-btn:active { transform: scale(0.98); }
+  .notice-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Inline boot progress shown on iOS while Phase 1 renders. Replaces the
+     Start button's text until the first file is ready. */
+  .play.booting {
+    pointer-events: none;
+    opacity: 0.7;
+  }
+  .play .boot-pct {
+    display: inline-block;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.82em;
+    letter-spacing: 0.08em;
+    margin-left: 2px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .modal { transition: none; }
     .beat-dot { transition: none; }
@@ -728,22 +870,30 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="jitter-dot" id="jitterDot" aria-hidden="true" title=""></span>
-    <span class="version">v34 · 20260423</span>
+    <span class="version">v47 · 20260424</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
 
 <main>
-  <div class="beats" id="beats"></div>
+  <!-- v42/v43/v44/v45: beats-wrap holds the beat dots plus the status
+       text line. Status text is absolutely positioned above the dots, so
+       it doesn't displace them. The breathing ring tried in v43 was
+       removed in v45 — at peak opacity it read as a hard-edged UI frame
+       rather than ambient motion. The dim on .beats plus the text line
+       do the feedback work cleanly. -->
+  <div class="beats-wrap">
+    <div class="catch-up-status" id="catchUpStatus" role="status" aria-live="polite"></div>
+    <div class="beats" id="beats"></div>
+  </div>
 
   <div class="bpm-display">
     <input
       class="bpm-number"
       id="bpm"
       type="number"
-      min="30"
-      max="300"
+      min="40"
+      max="320"
       value="120"
       inputmode="numeric"
     >
@@ -869,6 +1019,42 @@
   </div>
 </div>
 
+<!-- ---------- iOS first-load notice (rendered-file engine limitation) ---------- -->
+<!-- Shown on iOS before first play. Informs user of the 10-min session cap
+     and sets expectations for the native app. One-tap dismiss; not persisted
+     (each session gets the reminder until the native app ships). -->
+<div class="notice" id="iosNotice" role="dialog" aria-modal="true" aria-labelledby="iosNoticeTitle" aria-hidden="true">
+  <div class="notice-card">
+    <div class="notice-icon">heads up</div>
+    <h2 class="notice-title" id="iosNoticeTitle">iOS browser limit</h2>
+    <div class="notice-body">
+      <p>On iOS, the metronome runs in 10-minute sessions. Tap Continue when it finishes to keep going.</p>
+      <p class="small">Everything else works normally &mdash; tempo, time signatures, subdivisions, sounds, shortcuts.</p>
+    </div>
+    <div class="notice-actions">
+      <button class="notice-btn primary" id="iosNoticeDismiss">I understand</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- session-end notice (iOS only) ---------- -->
+<!-- Shown when the rendered file reaches its natural end. Offers a one-tap
+     restart without ceremony. If user picks Stop, the metronome just stops
+     and returns to the idle state — Start is available again. -->
+<div class="notice" id="sessionEndNotice" role="dialog" aria-modal="true" aria-labelledby="sessionEndTitle" aria-hidden="true">
+  <div class="notice-card">
+    <div class="notice-icon">session complete</div>
+    <h2 class="notice-title" id="sessionEndTitle">Keep going?</h2>
+    <div class="notice-body">
+      <p>You've reached the 10-minute session limit. Tap Continue to keep going.</p>
+    </div>
+    <div class="notice-actions">
+      <button class="notice-btn" id="sessionEndStop">Stop</button>
+      <button class="notice-btn primary" id="sessionEndContinue">Continue</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // t0ck changelog
 // v01 (2026-04-22) — initial (as temp0): lookahead Web Audio scheduler, tap tempo (last 4 taps), time sigs (4/4 3/4 6/8 2/4 5/4), subdivisions (off/8/16/3), URL hash + localStorage state, keyboard shortcuts, dark-mode aware
@@ -899,6 +1085,19 @@
 // v32 (2026-04-23) — hybrid audio engine. Two backends behind a common interface: WebAudioEngine (v24's procedural oscillator synthesis, used on desktop and Android) and HtmlAudioEngine (pre-rendered click samples via HTMLAudioElement pool, used when Web Audio is silently muted — i.e. iOS speakers). Backend selection: create an AudioContext on first Start tap, play a silent test buffer, inspect the AudioContext state and AudioBufferSourceNode 'ended' event timing. If the context fails to advance normally, fall back to HTML5. All four sound variants (sine/wood/tick/beep) and accent nuance preserved in both backends — the HTML5 backend uses 8 pre-generated samples (4 sounds × 2 accent variants) baked in as ~12KB of base64 data URIs. Added jitter indicator: small colored dot near the version tag shows scheduling quality in real time (green < 10ms, yellow < 25ms, red > 25ms). Scheduler auto-stops with a message when sustained jitter exceeds 80ms for 5+ consecutive ticks, so a degraded metronome is never silently trusted.
 // v33 (2026-04-23) — fix jitter measurement bug in v32. v32 measured "jitter" at schedule time instead of play time, so it was really measuring the scheduler's look-ahead window (0-100ms by design) rather than actual playback jitter. Result: the dot immediately went red and the auto-stop triggered for everyone, even when audio was working fine. Now jitter is measured inside the setTimeout callback at the moment the click actually plays, and only for the HTML5 backend (Web Audio has no JS-observable jitter because it schedules sample-accurately). Also relaxed the auto-stop threshold from 80ms to 150ms for 10+ consecutive ticks — v32's settings were too aggressive for real-world conditions.
 // v34 (2026-04-23) — force HTML5 backend on iOS. v32's hybrid detection logic never actually triggered the HTML5 fallback on iOS because it tested "does AudioContext.currentTime advance" as a proxy for "is sound coming out." On iOS, the context advances fine — iOS just silently mutes the speaker output for Web Audio. So the detection always passed and the HTML5 engine never loaded. The honest fix is UA sniffing: if WebKit on iOS, use HTML5; otherwise use Web Audio. Not elegant, but it maps to the real distinction — iOS WebKit is the one platform where Web Audio speaker output doesn't work. This is the cost of the platform, not a detection failure on our end.
+// v35 (2026-04-24) — replace HTML5 engine with rendered-file engine for iOS. v34's HTML5 backend used setTimeout scheduling + short sample playback, which produced audible jitter and swing at fast tempos and couldn't cleanly loop (gap at boundary). v35 renders a single continuous 10-minute MP3 for the user's current config (sound + time sig + subdivision + accent + base tempo) via OfflineAudioContext + lamejs, plays it through one HTMLAudioElement, and uses playbackRate for tempo. No scheduler, no jitter. Two base renders: 160 BPM (covers 40-160 at 0.25x-1.0x) and 320 BPM (covers 80-320). BPM changes inside a base's window are instant (playbackRate); changes crossing the boundary re-render and swap at the next measure boundary. Non-BPM changes (sound/sig/sub/accent) trigger a render-on-demand with measure-boundary swap. Pre-render pipeline at load: Phase 1 (blocking, ~4s) renders current config; Phase 2 (background) renders 3 other sounds at current base; Phase 3 (background) renders all 4 sounds at other base. Total cache: 8 configs, ~72 MB. Settings UI shows per-sound status (ready/rendering/queued) on iOS. Tap on pending sound queue-jumps it. 10-min session ends with "Continue / Stop" modal. First iOS load shows an "iOS browser limit" notice explaining the session cap. Jitter indicator and auto-stop removed — rendered files don't jitter. Web Audio path (desktop, Android) is completely unchanged from v24/v34.
+// v36 (2026-04-24) — copy cleanup on iOS modals. v35's notice text included "Our native iOS app is coming soon — it won't have this limit." Dropped because (a) the metronome App Store category is saturated and entering that market isn't the plan, and (b) "coming soon" is a promise on future time that costs nothing to make and everything to break; better to say nothing than pre-commit. Also dropped "That's a browser constraint, not a t0ck one" style framing from session-end modal — reads as blame-shifting even when factually correct. New copy states the 10-minute limit plainly, tells users what to do when it's hit, and stops. No apology, no promise, no defensiveness.
+// v37 (2026-04-24) — two iOS bugs from first real-device test: (1) Start/Stop button getting out of sync. Reproducer: hit Start before Phase 1 render is cached, then hit Stop while waiting. Old code's enqueue(...).then(playLoaded) unconditionally started audio when render completed, regardless of whether user had since stopped. Fix: added startIntent flag set in start() and cleared in stop(); the .then() callback checks it before calling playLoaded, so late completions are ignored. continueSession also sets startIntent=true for parity. (2) No feedback when a settings change (sound/sig/sub/accent) triggers a swap-at-measure-boundary. Old code's render-pending CSS existed but was never applied, and the stripe pattern at 4% opacity would have been invisible anyway. Fix: apply .render-pending to the tapped segment button immediately in handleSegmentClick (iOS-only, when playing); updated CSS to a moving accent-tinted shimmer that's clearly visible; added RenderedFileEngine.onSwapComplete listener API that fires inside tick() after a measure-boundary swap lands; init subscribes and clears all .render-pending classes on swap. Tap registers instantly (button activates), shimmer confirms work is in progress, shimmer clears when audio actually changes.
+// v38 (2026-04-24) — boot progress % was jumping 5 → 30 → 100 because bootPhases only notified bootProgress between major stages, not inside them. Since MP3 encoding is ~80% of boot time, the display sat at 30 for 3-4 seconds then snapped to 100 — looked stuck. Fix: threaded an optional onProgress(stage, fraction) callback through buildClickTemplates, renderFile, and encodeMP3. Each loop reports fractional progress; bootPhases maps the three stages to budget ranges (templates 0-10, render 10-20, encode 20-100) weighted to match observed iPhone timing. Encoding now emits ~25-30 progress updates over its run, so the % climbs smoothly. onProgress is optional, so background Phase 2/3 renders pass nothing and have zero overhead. Also tightened the render-loop yield cadence from every 500 steps to every 200, giving more responsive yields during the render stage on slower devices.
+// v39 (2026-04-24) — pending-swap shimmer was invisible on the tapped button. Two problems: (1) shimmer color was rgba(2, 132, 84, 0.20) — a green tint on top of a solid green accent fill, so zero contrast against the selected state. Replaced with a translucent white gradient (rgba 255/255/255/0.35) + mix-blend-mode: overlay, so it reads bright against the dark accent fill and remains subtle against the idle neutral background. Single definition now works for both light and dark mode — dropped the per-mode overrides. (2) Rapid taps (Wood → Tick) left the first button shimmering after it was deselected, because the render-pending class was never cleared on sibling buttons. Now handleSegmentClick clears .render-pending from all siblings in the group before adding it to the newly tapped button. Only the current intended selection shimmers. Also shortened shimmer cycle from 1.25s to 1.1s — felt a beat too slow in testing.
+// v40 (2026-04-24) — play button resetting to "Start" mid-playback on iOS. Reproducer: start metronome, open settings, change any setting. Button flipped from "Stop" back to "Start" even though audio continued. Root cause: bootRenderedEngine's updateBoot function was subscribed to engine.onStatusChange and set el.play.textContent='Start' whenever bootProgress was 100. After initial boot it keeps firing forever — any subsequent settings change triggers notifyStatus (to refresh sound-status dots), which re-runs updateBoot, which sees pct===100 and clobbers the play button. Fix: added a bootDone flag that latches once boot completes, making updateBoot a no-op after. Button updates from here are owned solely by start/stop/onSessionEnd/continueSession, as originally intended.
+// v41 (2026-04-24) — removed the per-sound status dots in Settings. They were small circles in the top-right of each sound button (green=ready, gray=queued, pulsing accent=rendering) meant to preview cache state before the user tapped anything. In practice they looked off-brand (especially the gray "queued" which read as disabled) and surfaced state for actions the user hadn't initiated. The .render-pending shimmer on actual tap is the real feedback mechanism — it fires exactly when the user needs it, on the exact button they tapped. Deleted: .sound-status CSS, updateSoundStatusUI function, its onStatusChange subscription, and all call sites. RenderedFileEngine.getSoundStatus method kept in the API in case a future revision wants pre-tap state; currently unused.
+// v42 (2026-04-24) — catching-up state on main UI. Gap in v41: after closing the settings panel on iOS, if the engine was mid-transition (pending swap hadn't landed yet, or audio element was loading a new blob after src swap), the main UI showed "Stop" button but no sign that audio was in-between files. Users saw silence and a Stop button and had no idea if something was actually happening. Added engine.isCatchingUp() which returns true when (pendingSwap is set) OR (audio.paused while we intend to play) OR (audio.readyState < HAVE_FUTURE_DATA, i.e., still loading the src blob). drawLoop polls this each frame and toggles a .catching-up class on el.beats. CSS: non-active beat dots pulse in unison (opacity 0.45 → 0.85, 1.4s ease-in-out loop) — a unified "standby" signal. Active beat still flashes normally on top when audio resumes. Class cleared on stop(). Pulse persists through rapid settings changes — each new pendingSwap keeps isCatchingUp truthy until a swap actually lands.
+// v43 (2026-04-24) — v42's per-dot pulse wasn't visible enough. Problem: while the swap-pending old file kept playing normally, the active beat dot still flashed at full brightness each beat. The subtle pulse on non-active dots got drowned out by the active flash, so the overall impression was "nothing's different" even though a swap was queued. Needed a signal that stands out during normal playback, not just during silent gaps. Redesigned as three complementary layers: (1) dim the entire beats row to ~55% opacity during catching-up — tells the user "this state isn't final" regardless of whether beats are flashing; (2) breathing accent-colored ring around the beats container, opacity pulsing 22% → 55% on a 1.6s loop — unified "something's in motion" signal that doesn't compete with individual dot animation; (3) status text line below the beats: "Changing sound…" / "Changing sound and time signature…" / "Changing sound, time signature, and subdivision…" — grammatically correct for any number of simultaneous changes (diffs currentConfigKey against pendingSwap.key to extract which fields differ). For base-only differences (BPM crossed threshold with no other change), text returns null — BPM numeric display already gives immediate feedback. Falls back to "Loading…" when audio is between files with no config diff. Ring and text are siblings of .beats (not descendants) so the opacity dim on .beats doesn't cascade into them. Reduced-motion preference disables the ring's breathing animation and keeps it at a steady mid-opacity.
+// v44 (2026-04-24) — two issues: (1) every page reload re-rendered the full 4-5s boot because the file cache was in-memory only. Ron pointed out this was never promised but the expectation made sense, so added IndexedDB persistence. blobDB module wraps IDB's async API and stores each rendered MP3 keyed by configKey. bootPhases checks IDB before rendering — hits skip the render and jump bootProgress from 0 to 100 in a frame. Background queue (Phase 2/3) also checks IDB per-config before rendering. All IDB operations wrapped to fail silently: private-browsing Safari, quota exhaustion, or user-agent denial all fall back to v43 behavior (render every session, no crash). DB versioned (DB_VERSION=1); bumping the version wipes the store, which we'll use to invalidate if sound recipes or render format ever change. (2) Status text line was shifting the beat dots up by reserving layout space below them. Moved the text to position:absolute above the beats with bottom: calc(100% + 14px), removed the margin-top/min-height. Dots now stay at the original position regardless of whether catching-up text is visible, and the text floats above without displacing anything. HTML ordering also updated — status text now first child of .beats-wrap so it's semantically above.
+// v45 (2026-04-24) — two refinements: (1) the v43 breathing ring around the beat dots looked amateurish on iPhone — at peak opacity it read as a hard-edged pill-shaped UI element rather than ambient motion, like a segmented-control border had leaked in. Removed entirely. Catching-up state is now just the dim on beats + the status text above. Two layers is enough; three was overdesigned. Also added 24px top margin on .beats-wrap so the dots sit lower with room for the status text to appear above without feeling cramped against the header. (2) The iOS browser-limit notice was appearing on every page reload, which got tiring fast — especially now that reloads are near-instant from IDB cache. Added localStorage-backed dismissal (key: 't0ck-ios-notice-dismissed'). First-ever visit shows the notice; subsequent visits skip straight to boot. If localStorage is denied (private browsing), falls back to showing every session, which is annoying but not broken — and in that mode the render cache is also lost, so there's a bigger issue anyway.
+// v46 (2026-04-24) — settings changes felt slow on iOS because the swap waited for the next measure boundary of the OLD file. At slow tempos with long measures (60 BPM in 6/8 = 6-second measure), a sound change could take 5+ seconds to take effect. That policy was designed for musical continuity when a user is "playing along" with the metronome, but it's the wrong policy when the user is actually CHANGING settings — they're exploring, not performing. Split the swap policy by change type: sound/sig/sub/accent changes now pass immediate:true to onConfigChange and swap as soon as the target file is available, no measure-boundary wait. Cross-base BPM changes (which still route through onConfigChange via onBpmChange when crossing the 160/320 threshold) keep the measure-boundary behavior, because BPM changes are more likely to happen mid-performance when continuity matters. Extracted the swap body into a performSwap() helper shared between tick() (boundary path) and onConfigChange (immediate path, when target is already cached — shaves another animation frame off perceived latency). Small audible blip on iOS during the pause/src/play transition is accepted as the cost of responsiveness; users exploring sounds rapidly want the change to land, not a smooth phrase transition.
+// v47 (2026-04-24) — subdivision changes still felt slow because Phase 2 pre-renders only covered other sounds at the current config. Subs, accent, and cross-sound × cross-sub combos were never pre-rendered, so every sub change paid full ~4s render cost on first touch. Expanded pre-render coverage to a "neighborhood" concept: all single-axis variants of the current config get queued (other sounds, other subs, other accent) — plus the same neighborhood at the other base on initial boot. Extracted the logic into queueNeighborhoodRenders(config) so it can be called from bootPhases (initial boot) and from performSwap (after every swap, re-centered on the new current config). This means once the user changes, say, sound to Wood, the background queue refills with Wood's neighbors — other subs at Wood, other accent at Wood, etc. — so the next sub change from that position is also instant. Sigs intentionally omitted from the neighborhood (users rarely change sig mid-session; render cost isn't worth speculative coverage). Dedup in enqueue() keeps this safe to call repeatedly. Combined with IDB persistence from v44, the practical effect is: first-ever visit pays up-front render cost for ~14 configs (~50s background work after boot); every subsequent visit has the neighborhood pre-loaded from disk.
 (function () {
   'use strict';
 
@@ -924,6 +1123,8 @@
     tap: document.getElementById('tap'),
     play: document.getElementById('play'),
     beats: document.getElementById('beats'),
+    beatsWrap: document.querySelector('.beats-wrap'),
+    catchUpStatus: document.getElementById('catchUpStatus'),
     openSettings: document.getElementById('openSettings'),
     closeSettings: document.getElementById('closeSettings'),
     modal: document.getElementById('modal'),
@@ -1053,24 +1254,25 @@
   }
 
   // ---------- BPM helpers ----------
-  function clampBpm(n) { return Math.max(30, Math.min(300, n | 0)); }
+  // v35 lifted floor to 40 and ceiling to 320 to match the rendered-file
+  // engine's usable range. The old 30-300 range had outliers that didn't
+  // map cleanly to the two-base architecture (30-39 would need a 3rd base
+  // for marginal benefit; 300-320 was always unreachable by v24's clamp).
+  function clampBpm(n) { return Math.max(40, Math.min(320, n | 0)); }
 
   function setBpm(n) {
     state.bpm = clampBpm(n);
     el.bpm.value = state.bpm;
     persist();
+    if (audioEngine === RenderedFileEngine && isPlaying) {
+      audioEngine.onBpmChange(snapshotState());
+    }
   }
 
-  // ---------- audio sample bank (for HTML5 fallback) ----------
-  // Eight pre-generated click samples, base64-encoded WAVs. 22kHz 8-bit mono
-  // for compactness (~12KB total). Used by HtmlAudioEngine; WebAudioEngine
-  // ignores these and synthesizes on the fly.
-  const SAMPLE_SRCS = {
-    sine:  { accent: 'data:audio/wav;base64,UklGRk8FAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAABAAgAZGF0YSsFAACAr9To59CpekwpGBs0W4q21+bgxp5wRicbIz5mk7zZ49i8lGdAJh4qSHCcwdnf0bKKXzwmIzJSeqTF2drIqIBYOCcoO1uDqsjX1MCfd1I2KS5DZYywytXOt5ZvTTQsNExuk7XL0sivjWhINC87VHaauMvOwaeFYkU0M0JdfqC7ysq6nn1cQjY4SWWGpr3JxbOWdldBOD1QbI2qv8a/rI9vU0A6Qld0k66/w7qkiGlQQD1IXnuYsb/AtJ2BZE1BQU5lgZ2zvryul3tgS0JFVGyHobS8uKiQdVxKRElaco2ltbqzoopwWUpGTmB4kqi1uK+chGtWSklTZn6WqrW1qpZ+Z1RLTFhsg5qrtLGlkXljU0xQXXGInayyraCLdWBSTlRido2grbCqmoZwXlJQWGd7kaKtrqWVgW1cU1NcbICUpKyroZF9aVtUVWBxhJelq6idjHhnWlVZZHWImqWppZmHdWRZVlxoeoycpqihlINxYlpYX21+j52lpZ6Qf25hWltjcYKSnqWjmox8bGBbXWZ1hZSfpKCXiHhqYFxganmIlqCinpOFdWhfXmNufIuYn6GbkIFyZmBfZnF/jpmfn5iMfnBlYGFpdYOQmp6dlYl7bmVhZGx4hZKanZqShnhsZWJmb3uIk5qcmI+DdmtlZGhyfoqVmpuVjIB0amVla3WBjJWamZOJfXJpZWdtd4OOlpmXkIZ7cGlmaXB6hZCWmJWOhHhvaWdrcn2IkZaXk4uBdm5paW11f4mSlpaRiX91bWlqb3eBi5KWlI+GfXNtamtxeoOMk5WTjYR7cmxrbXN8hY2TlJGLgnlxbGxvdX6HjpOTj4mAd3BtbXF4gIiPkpKOhn52cG1ucnqCio+SkIyEfHVvbW90e4SLkJGPioN7dG9ucXZ9hYyQkI6IgXlzb29yeH+GjI+PjIZ/eHNwcHR6gYeNj46LhX53cnBxdXuCiI2PjYmDfHZycXJ3fYOJjY6MiIF7dXJxc3h+hYqNjYuGgHp1cnJ1eoCGio2NioV/eXRyc3Z7gYeLjYyIg314dHN0d3yCh4uMi4eCfHd0c3V5foOIi4yKhoF7d3R0dnp/hIiLi4mFf3p2dHR3e4CFiYuKiIN+enZ0dXh8gYaJiomHgn15dnV2eX2ChomKiYWBfHh2dXd6foOHiYmIhIB8eHZ2eHt/hIeJiYeDf3t4dnZ5fICEh4mIhoJ+end2d3p9gYWIiYiFgX16d3d4en6ChYiIh4SAfXl3d3l7f4OGiIiGg4B8eXd4eXyAg4aHh4WCf3t5eHh6fYGEhoeHhYJ+e3l4eXt+gYSGh4aEgX16eXh5fH+ChYaHhYOAfXp5eXp8f4KFhoaFgn98enl5e32Ag4WGhoSCf3x6eXl7foGDhYaFhIF+e3p5enx+gYSFhoWDgH17enl6fH+ChIWFhIKAfXt6ent9gIKEhYWEgn99e3p6fH6Ag4SFhYOBf3x7ent8foGDhIWEg4B+fHt6e31/gYOEhYSCgH58e3t7fX+Cg4SEg4J/fXx7e3x+gIKDhISDgX99e3t7fH6AgoSEhIKBf317e3x9f4GChISDgoB+fHt7fH1/gYOEhIOBgH58e3t8foCBg4SDg4F/fXx8fH1+gIKDg4OCgX99fHx8fX+AgoODg4KAf318fHx9f4GCg4ODgYB+fXx8fX5/gYKDg4KBf359fHx9foCBgoODgoF/fn18fH1/gIGCg4KCgH9+fXx9fn+AgoKDgoGAf319fH1+f4GCgoKCgYB+fX19fX4=', regular: 'data:audio/wav;base64,UklGRnIEAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAABAAgAZGF0YU4EAACAkqSzwMnP0M3HvK+fjnxqWUtANzMyNj1IVWV2h5intL/GycnFvbKllYV1ZVdLQTs5Oj9HUl9ufo2cqbS9wsPBvLSpnI1+b2FVS0RAP0FHUFtodoSSn6u0ur29urSroJSGeGtfVExHREVIT1hjb3yJlqGrsre4t7Oso5mNgHNnXVROSklLT1ZfanaCjpmjqrCzs7GspZyShntvZVxVUE5OUVZdZnB7hpGbo6mtr66rpp+WjIF3bWRcVlNSU1ZcY2x2gIqUnKOoq6uqpqCZkId9c2pjXVhWVlhcYmlye4SNlZ2ipqenpaCak4uCeXFpYl1aWVpdYWdudn+Hj5ecoaOko6CblY6GfnZvaGNfXVxeYWZsc3uCipGXnJ+hoZ+cl5GKg3t0bWhjYV9gYmVqcHd+hYySl5uenp6bmJONhn94cmxoZGJiY2ZpbnR7gYiOk5eanJyamJSPiYN9dnFsaGZlZWZpbXJ4foSJj5OWmZmZl5SQi4aAenVwbGlnZ2dpbXF1e4CGi4+TlZeXlpSRjYiDfnl0cGxqaWlqbHB0eH2Ch4yPkpSVlZSRjoqFgXx3c3Bta2trbW9zdnt/hIiMj5KTk5ORjouHg396dnNwbm1tbW9ydXl9gYWJjY+RkpKRj4yJhYF9eXVycG9ubnBydHd7f4OHio2PkJCQjoyKhoN/e3h1c3FwcHBydHZ6fYGEh4qMjo+PjoyKiISBfnp3dXNxcXFydHZ4e3+ChYiKjI2OjYyLiIaDgH16d3VzcnJzdHV4en2Ag4aIiouMjIyLiYeEgX58eXd1dHNzdHV3eXx+gYSGiIqLi4uKiYeFg4B9e3l3dXV0dXV3eXt9gIKEh4iJioqKiYiGhIF/fHp4d3Z1dXZ3eHp8foGDhYeIiYmJiYiGhIKAfnx6eHd2dnZ3eHl7fX+Bg4WHiIiJiIiGhYOBf317enh3d3d3eHl7fH6AgoSFh4eIiIeGhYSCgH59e3p5eHh4eHl6fH1/gYOEhYaHh4eGhYSDgX9+fHt6eXh4eHl6e31+gIGDhIWGhoaGhYSDgoB/fXx7enl5eXl6e3x+f4GCg4SFhoaGhYWEgoGAfn18e3p6eXp6e3x9foCBgoOEhYWFhYWEg4KAf359fHt6enp6e3x9fn+AgYKDhIWFhYSEg4KBgH99fHx7e3p6e3t8fX5/gYKDg4SEhISEg4KBgH9+fXx8e3t7e3t8fX5/gIGCg4OEhISEg4OCgYB/fn18fHt7e3x8fX5+f4CBgoODhISEg4OCgYB/f359fHx8fHx8fX1+f4CBgYKDg4ODg4OCgYGAf35+fXx8fHx8fX1+f3+AgYKCg4ODg4OCgoGAgH9+fX18fHx8fX1+fn+AgIGCgoKDg4OCgoGBgH9/fn19fXx8fX19fn9/gIGBgoKCgoKCgoGBgIB/fn59fX19fX19fn5/gICBgYKCgoKCgoGBgIB/f35+fX19fX19fn5/' },
-    wood:  { accent: 'data:audio/wav;base64,UklGRgQEAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAABAAgAZGF0YeADAACkydu3k29MKjVXepu93r2cfFw8K0tqiajGza6Qc1Y5N1RwjKjDx6uQdVtBN1FrhZ63y7KagWlROkZedYyjucGqlH5pUz5KX3SJnbLBrJiFcV5LRVhrfpCitLakkoBvXk1KXGx9jp6utaWVhXZmV0hXZnWDkqCvrZ+Rg3VnWk1ZZnSBjpqnrqGViHxwZFhUYGx3g46apaqflIl+c2leVF9pdH6Ikpulo5mPhn1zamFYYWpzfIWNlp6km5OKgnpyamJdZW11fISLk5qhm5OMhX53cGljYmlwd32EipCXnZmTjYeBe3VvaWRnbXN4foOJjpSZmJKNiIN+eXRvamZrcHV5foOHjJCVl5KOiYWBfHh0cGxqbnJ2en6ChoqOkpSQjIiEgX15dXJubHBzd3t+goaJjJCSj4uIhIF9endzcG5xdXh7foKFiIuOkI2Kh4SBfnt4dXJwc3Z5e36BhIeJjI6MiYaDgX57eXZ0cXR3eXx+gYOGiIuNioiFg4F+fHp3dXN1eHp8foGDhYeJi4mHhYOBf3x6eHZ0dnh6fH6AgoSGiIqIhoSCgX99e3l3dnd5e31+gIKEhYeJh4aEgoF/fXx6eHd4ent9foCCg4WGiIeFg4KBf358e3l4eXp8fX+AgYOEhYeGhIOCgH9+fXt6eXp7fH1/gIGCg4WGhYSDgoB/fn18e3p6e3x+f4CBgoOEhYWDgoGAf359fHt6e3x9fn+AgYKCg4SEg4KBgH9+fn18e3t8fX5/gICBgoOEhIOCgYB/f359fHx8fH1+f4CAgYKCg4OCgoGAf39+fX18fH19fn9/gIGBgoODgoGBgIB/fn59fHx9fn5/f4CBgYKCgoKBgYCAf35+fX19fX5+f3+AgIGCgoKCgYGAgH9/fn59fX5+fn9/gICBgYKCgYGAgIB/f35+fX1+fn9/f4CAgYGBgoGBgICAf39+fn5+fn5/f3+AgICBgYGBgYCAgH9/f35+fn5+f39/gICAgYGBgYGAgIB/f39+fn5+f39/f4CAgIGBgYGAgICAf39/f35+fn9/f3+AgICAgYGBgICAgH9/f39+fn5/f39/gICAgIGBgICAgIB/f39/f35/f39/f4CAgICAgYCAgICAf39/f39+f39/f3+AgICAgICAgICAgH9/f39/f39/f39/gICAgICAgICAgIB/f39/f39/f39/f4CAgICAgICAgICAf39/f39/f39/f3+AgICAgICAgICAgH9/f39/f39/f39/gICAgICAgICAgIB/f39/f39/f39/f4CAgICAgICAgICAf39/f39/f39/f3+AgICAgICAgA==', regular: 'data:audio/wav;base64,UklGRicDAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAABAAgAZGF0YQMDAACRo7XGyrimlYR0Y1NDM0NTY3ODkqGwv8O0pZaIeWtdT0JBT11qeIWSn6y4vbCjl4p+cmZaT0NMWGRveoaRnKaxuK2imI2DeW9lW1FKVF5ncXuEjZafqLGso5qRiYB3b2dfV09YYGhweICIj5eepa2mnpePiIF6c2xmX1hZX2Ztc3qAho2TmZ+lo52XkYuFgHp0b2lkX1xiZ21yd3yCh4yRlZqfn5uWkYyHg356dXFsaGRgZWltcnZ6foKGio6SlpmcmJSQjImFgX56d3NwbWlmZ2tucXV4e36ChYiLjpGUlpeTkI2LiIWCf3x6d3Ryb21qa21wc3V4en1/goSGiYuNj5GUko+Ni4mGhIKAfnx6eHZ0cnBubnBydXd5enx+gIKEhoiJi42PkI6MioiHhYOBf358enl3dnRycXJ0dXd5enx9f4CChIWHiImLjIyLiYiGhYOCgX9+fHt6eHd2dHN1dnd5ent9fn+BgoOEhoeIiYqKiIeGhYSCgYB/fn18enl4d3Z2d3h5ent8fn+AgYKDhIWGh4iJiIeGhYSDgoGAf359fHt6eXh4eHl6e3t8fX5/gIGCgoOEhYaGh4aFhIODgoGAf39+fXx8e3p6eXl6e3x8fX5/f4CBgYKDg4SFhYWFhIODgoGBgH9/fn19fHx7e3p7e3x8fX5+f3+AgYGCgoODhISEhIOCgoGBgIB/f35+fX18fHt7fHx9fX5+f3+AgICBgYKCg4OEg4OCgoGBgICAf39+fn59fXx8fHx9fX5+fn9/gICAgYGCgoKDg4KCgoGBgYCAf39/fn5+fX19fX19fX5+fn9/f4CAgIGBgYKCgoKCgYGBgYCAgH9/f39+fn5+fX19fn5+fn9/f3+AgICAgYGBgYKCgYGBgYCAgIB/f39/fn5+fn5+fn5+fn9/f3+AgICAgIGBgYGBgYGBgYCAgICAf39/f39+fn5+fn5+f39/f39/gICAgICAgYGBgYGBgICAgICAf39/f39/f35+fn5+f39/f39/f4CAgICAgIA=' },
-    tick:  { accent: 'data:audio/wav;base64,UklGRksCAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAABAAgAZGF0YScCAACJY1uXvJplQmehjYdtZKmxVlWyil6VhFWSq1FJuc1pSXWvi02ApoplanV3j4Nze4mcg2JvjKuQWFeWoWuCmHRtjZNlUYqrgHiUdWeEmoVaa5+WcH+FbYmYZFqKrZdgU4q6i1h3gIKRfWh+jH9/jY1paIeckWJnlYx3fYWCbHSLl45xZnSan2ZaiKGPYGiXknlzdoiReWqMl3NqfoqHgHl4gIuEfYV3cYuMc36OfniDfnOBjYJ7f4Z6c4OPgG19j4N0gYqAeXWGkX90fH9+gIB+f4qBd36ChoV5eH+BiIN3fYGBg4J7foJ7gYd9doOIfXt/goGBfHyBgIF/fIKBfISGeHSDjYR3d3+IhXp8g359goGCfHmAh4J7f4CAf3+Dg3p6g4KAgX1/gn97fYaGe3mBgX1+hIN9fX5/gIKDfXx/g4N+fIB/f4GBgX9/foCAgIF+foGAgH99f4KCgHx9goN/fX6BgX9/foCDgH1/gYB/f4CAgX9/gH9+gIF/f4F/foCBgH5/goF+fn+Af36AgYB+f4CAgYB+foGCf36AgX5+f4GBgH5+gYB/f3+Af3+Bf36AgYB9foKBfn6AgH9/f4CAgIB/gH9/f4CAf39/gICAgIB/f4CAf36AgH9/gIB/f4CAf3+BgH9+f4CAf3+AgH+AgH9/gIB/f4CAf39/f3+AgICAf4B/f3+AgH9/gIB/f39/gICAgH9/gH9/gIB/gH9/gICAf3+AgA==', regular: 'data:audio/wav;base64,UklGRt0BAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAABAAgAZGF0YbkBAACGcFxyobynXjBKgLuvdGqBgIGWfm2JhWp9lHZfgqymh2FleH6SlIZ1bGRmg5GMf3eHkIJxbY2lj2ZfdIOho31kboaDbGyCjZufel5mhpqFbXB/i5iKaW+GgHJyiZ+TbF6Am5mJZFx+lY5+cW+BlZp9ZGWCoJN2bW5/kpKDamZ3lKWSblZumZqAbHCJi4B9eoCGfnqCgnuDioB3dHeDjYh6cnuHjI16anaGh4mHe3h+f3l8hIaFgn95dHyIin13e4CChoWAfHZ8iYuEenJ0f4eGgIGAfn59goeCe3d4hIuEfXZ4gomFfnp3foeGfXx/gIOBf36AgH5+foGCf39/fYKGgHd5goqHfXR5hIeFf3d5gIWGgHh4gIaGgnx6fYGFhX55e3+EhoF8fH5/f4KFgn18fH2BhIWBfXt7f4OGgnx6foOFgX16fIGEhIB9e32AgoN/fX5/gYF/fX+Cg4B9fX+Cgn9+foCBf3+AgIB/f39/gICAgICAf39+f4GAgIB/fn+AgYB/gIGAf35+f4CBgYB/fn5/gYF/fX6AgYGAf35+f4CBgX9+f4CAgH9/f3+BgH9/gIGAf3+AgIA=' },
-    beep:  { accent: 'data:audio/wav;base64,UklGRggHAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAABAAgAZGF0YeQGAACAgIGDhYaHhoSAfHdyb21tcHV8hY6Wm56emZGGem1iWVVVW2VzhJWksLa3sKSTfmlWRj08QlBkfJatwMzQyrukiWtPOSsnLTxUcI+rw9LY1MawlHZZQC8nKTZKZYOhu83X18y5n4FjSTQpJzBCW3iWssfV2NLBqY1vUjssJys6UW2LqMDR2NXIs5h6XEMxJygzR2J/nbjM19jOvKOFZ0w3KicuP1d0kq7F1NjTxK2QclY+LScqOE1ph6S9z9jWy7acfmBGMygoMkRefJq1ydbY0L+miWtPOSsnLTxUcI+rw9LY1MawlHZZQC8nKTZKZYOhu83X18y5n4FjSTQpJzBCW3iWssfV2NLBqY1vUjssJys6UW2LqMDR2NXIs5h6XEMxJygzR2J/nbjM19jOvKOFZ0w3KicuP1d0kq7F1NjTxK2QclY+LScqOE1ph6S9z9jWy7acfmBGMygoMkRefJq1ydbY0L+miWtPOSsnLTxUcI+rw9LY1MawlHZZQC8nKTZKZYOhu83X18y5n4FjSTQpJzBCW3iWssfV2NLBqY1vUjssJys6UW2LqMDR2NXIs5h6XEMxJygzR2J/nbjM19jOvKOFZ0w3KicuP1d0kq7F1NjTxK2QclY+LScqOE1ph6S9z9jWy7acfmBGMygoMkRefJq1ydbY0L+miWtPOSsnLTxUcI+rw9LY1MawlHZZQC8nKTZKZYOhu83X18y5n4FjSTQpJzBCW3iWssfV2NLBqY1vUjssJys6UW2LqMDR2NXIs5h6XEMxJygzR2J/nbjM19jOvKOFZ0w3KicuP1d0kq7F1NjTxK2QclY+LicrOE5ph6S8ztbUybWbfmFINSsrNUdgfJiyxtHTzLukiGxSPTEtM0FXco2ovcvRzcCsknddRjcwMj1QaIOdtMXNzcOym4FnUD40MzpKYHmTq73JzMa4o4txWUY5NTlFWHCJobXDyca8qpR7Y04/ODlCUmd/mK29xca+sJuEbFdGPDpATWB3jqS2wcTAtKKNdV9NQTw/SVpuhZuuu8LAuKiUfmhVRz8/RlRnfZOmtb7Auq2bhnFdTUNARVBhdYqer7q+u7GhjnllVEhCRE1bboKWqLS7u7SmlYFtW01GRUpWZ3qOoa+3urWrm4h0YlNKRklTYXOHmamzuLauoI98aVpOSUlQXW1/kqKutbWwpJWDcWBTTEpPWWd5i5upsbSxqJqKeGdZUExOVmJyhJWjrbKxqp+Pfm5fVE5OVF5tfY6dqa+xrKKVhXRlWVFPUltod4iXpKyvraWZi3prXlVRUllkcoGRnqitraedkIBxY1lTUldgbXyLmaSqrKmglIZ3aV5WVFZdaHaFk5+nq6mjmIt9b2JaVVZbZXF/jpqjqKmknJCCdGheWFdaYm16iJWfpqilnpSHem1iW1hZYGl1g5Cbo6amoJeMf3JmXlpaXmZxfouWn6SlopqQhHdrYlxaXWRteYaSm6KkopyTiHxwZl9cXWJqdYGNl5+iop6WjIB0amJeXWBncX2Ik5ugop+ZkIV5bmZgXmBlbniEj5ieoZ+bk4l9c2ljX2Bka3V/ipSbn5+clYyCd21mYWBjaXF8hpCYnZ6cl4+Fe3FpY2FiZ254goyUmp2dmZKJf3VsZmNiZmx1foiRmJycmpSMg3lwaWRjZWpye4SNlZqbmpaPhn1zbGZkZWlvd4GKkpeampeRiYB3b2llZWhtdX2GjpWZmpiTjIN7cmxnZmdrcnqDi5KXmZiUjoZ+dm5pZ2dqcHd/iI+VmJiVkImBeXFsaGdqbnV8hYySlpeWkoyEfHRuamhpbXJ6gYmQlJaWk46Hf3dxbGlpbHF3f4aNkpWWlI+Jgnp0bmtqa291fIOKkJSVlJCLhH12cGxqa25zeYCHjZKUlJGNh4B5c25sa21xd36Fi5CTlJKOiYJ8dXBtbG1wdXuCiI6Rk5KPi4V+eHJvbW1vc3l/houQkpKQjIeBenVwbm1vcnd9g4mOkZKRjYmDfXdyb25ucXV7gYeMj5GRjoqFf3l0cG5ucHR5f4WKjpCQj4yHgXx2cnBvcHN3fYKIjI+Qj42Ig354dHFvcHJ2e4CGio2Pj42KhYB7dnJwcHJ1eX6DiIyOj46Lh4J9eHRxcHF0eHyBhoqNjo6MiIR/enZzcXFzdnt/hImMjo6MiYWAfHd0cnFzdXl+goeKjY2NioeCfXl1c3JydHh8gYWJjI2Ni4iEf3t3dHJydHd7f4OHioyMi4mFgXx4dXNzdHZ5fYKGiYuMi4mGgn56d3RzdHV4fICEiIqMi4qHhIB8eHV0dHV3e36DhomLi4qIhYF9end1dHV2eX2BhYiKi4qJhoN/e3h2dHV2eHw=', regular: 'data:audio/wav;base64,UklGRggHAABXQVZFZm10IBAAAAABAAEAIlYAACJWAAABAAgAZGF0YeQGAACAgIGCg4WGh4eHhoSBfnp2c29ta2ttb3R5f4aNk5mdoKGfnJaOhXtxZ19YU1FSVl1mcX6LmaWvtrq7uLGmmYp6aVlMQTs6PENOW2t9jp6tucHFxcC3q5yMemlZTEI8OjxDTVpqfI2erLjBxcXAuKydjXtqWk1CPDo8QkxaaXuMnau4wMXFwbmtno58a1tNQzw6PEJMWWh6i5yrt8DFxcG5rp+PfWxcTkM8OjtBS1hoeYqbqra/xMXBuq6gkH5tXU9EPTo7QUpXZ3iJmqm2v8TFwrqvoZF/bl5QRD06O0BKVmZ3iJmotb/ExcK7sKKSgG9fUEU9OjtASVZldoeYqLS+xMXCu7CjkoFwX1FGPjo7P0hVZHWGl6e0vsTFw7yxo5OCcWBSRj46Oj9IVGN0hZams73DxcO8sqSUg3JhU0c+Ojo/R1Nic4SVpbK9w8XDvbOllYRzYlNHPzo6PkdSYXKDlKSyvMPFw72zppaFdGNUSD86Oj5GUmBxgpOjsbzDxcS+tKeXhnVkVUhAOzo+RVFfcIGSorC7wsXEvrWomId2ZVZJQDs6PUVQXm+AkaKwu8LFxL+1qJmId2ZWSkA7Oj1ET15uf5Chr7rCxcS/tqmaiXhnV0pBOzo9RE9dbX6PoK66wcXEv7aqm4p5aFhLQTs6PENOXGx9j5+tucHFxcC3q5yLemlZTEI8OjxDTVtrfI6erbnBxcXAuKydjHtpWkxCPDo8Qk1aanuNnay4wMXFwbisno18altNQzw6PEJMWWl6jJyrt8DFxcG5rZ+OfWtbTkM8OjtBS1hoeYubqrfAxMXBua6fj35sXE5EPTo8QktYZ3iJmqm1vsPDwLitn49/bl9RR0A9PkRNWWh4iJimsru/wL22rJ+QgHBhVEpDQEFGT1pod4eWpK+4vL27tKqekIBxY1dNRkNESFBbaHeGlKGstbq7uLKpnZCBc2VZT0lGRkpSXGh2hZOfqrK3uLawqJ2QgnRnW1JMSElMU11pdoSRnaivtLa0r6eckIN1aV1UTktLTlVeaXaDj5ulrbKzsq2lm5CDdmpgV1FNTVBWX2l1go6Zo6qvsbCrpJuQhHhsYVlTUE9SWGBqdYGNmKGora+uqqOakIR5bWNbVVJSVFlhanWAjJafpqutrKiimZCFeW9lXVdUVFZbYmt1gIqVnaSpq6qmoZmPhXpwZ19ZVlVXXGNrdX+Jk5uip6mopaCYj4V7cWhhW1hXWV1ja3V+iJKaoKWnpqSel4+GfHJqY11aWVteZGx1foeQmJ+jpaWinZePhn10a2RfXFtcYGVsdX6Hj5edoaOjoZyWj4Z9dW1mYV1cXWFmbXV9ho6Vm5+iop+blo6GfnVuZ2JfXl9iZ211fYWNlJqeoKCempWOhn52b2lkYV9gY2hudXyEjJOYnJ6fnZmUjod/d3BqZWJhYmRobnV8hIuSl5udnZyZlI6Hf3hxa2dkYmNlaW51fIOKkJaZnJybmJONh4B5cmxoZWRkZmpvdXyDiY+UmJqbmpeTjYeAeXNuaWZlZWdrb3V7goiOk5eZmpmWko2HgHp0b2pnZmZoa3B1e4KIjZKWmJiYlZGMh4F7dXBraWdnaWxwdXuBh4yRlZeXl5SRjIeBe3ZxbWpoaGptcXV7gYaMkJOWlpaUkIyHgXx2cW5raWlrbXF2e4CGi4+SlZWVk5CMh4F8d3JvbGpqa25xdnuAhYqOkZSUlJKPi4eCfXhzcG1ra2xvcnZ7gIWJjZCTk5ORj4uHgn14dHBubGxtb3J2e3+EiY2QkpKSkY6Lh4J9eXVxb21tbnBzdnt/hIiMj5GSkZCOioeCfnl1cnBubm5wc3d7f4OHi46QkZGPjYqGgn56dnNwb29vcXN3e3+Dh4qNj5CQj42KhoJ+end0cXBvcHF0d3t/g4aKjI6Pj46MioaDf3t3dHJwcHBydHd7foKGiYyOj4+OjImGg397eHVzcXFxcnV3e36ChYiLjY6OjYuJhoN/fHh1c3JxcnN1eHt+goWIioyNjY2LiYaDf3x5dnRzcnJzdXh7foGFh4qMjY2Mi4iGg398eXd1c3NzdHZ4e36BhIeJi4yMjIqIhoOAfXp3dXRzc3R2eHt+gYSGiYqLjIuKiIaDgH16eHZ0dHR1dnh7foGDhoiKi4uLiYiFg4B9enh2dXR0dXd4e36Ag4aIiYqLiomHhYOAfXt5d3V1dXZ3eXt+gIOFh4mKioqJh4WDgH57eXd2dXV2d3l7fYCChYeIiYqJiIeFg4B+e3l4dnZ2dnd5e32AgoSGiImJiYiHhYOAfnx6eHd2dnd4eXt9gIKEhoeIiYiIhoWDgX58enh3d3d3eHl7fYCChIaHiIiIh4Y=' }
-  };
+  // ---------- (removed in v35) SAMPLE_SRCS base64 bank ----------
+  // v32-v34 shipped 8 pre-generated click samples inline (~12 KB) for the
+  // HTML5 fallback. v35 renders full-length MP3s on device via OfflineAudioContext
+  // + lamejs, so the static bank is gone. See RenderedFileEngine below.
 
   // ---------- Web Audio noise buffer helper (used by 'tick' sound) ----------
   let _noiseBuffer = null;
@@ -1164,65 +1366,709 @@
     };
   })();
 
-  // ---------- HTML5 audio backend ----------
-  // Pre-rendered samples, setTimeout scheduling. Used as fallback when Web
-  // Audio is muted by the platform (iOS 26+ built-in speaker). Lower
-  // scheduling precision but actually produces sound.
-  const HtmlAudioEngine = (function() {
-    const POOL_SIZE = 4;
-    const pools = {};  // { sine: { accent: [4 audio], regular: [4 audio] } }
-    const poolIdx = {};
+  // ---------- rendered-file audio backend (iOS) ----------
+  // v35: Pre-renders a 10-minute MP3 for the current config (sound + sig +
+  // sub + accent + base tempo), plays through one HTMLAudioElement, uses
+  // playbackRate for tempo control within each base's window.
+  //
+  // Two bases cover 40-320 BPM:
+  //   160 base: playbackRate 0.25-1.00 → covers 40-160 BPM
+  //   320 base: playbackRate 0.25-1.00 → covers 80-320 BPM
+  //
+  // Pre-render phases on init:
+  //   Phase 1 (blocking): current config at current base → ~4-5s on iPhone
+  //   Phase 2 (background): other 3 sounds at current base
+  //   Phase 3 (background): all 4 sounds at other base
+  //
+  // Config changes (sound/sig/sub/accent): render if not cached, swap at
+  // next measure boundary. BPM changes inside a base's window: instant
+  // playbackRate adjust. BPM crossing base boundary: same as config change.
+  //
+  // v44: Rendered MP3s now persist across page reloads via IndexedDB. On
+  // boot, bootPhases checks IDB for the current config's blob first; only
+  // renders if the DB miss. Phase 2/3 background renders also check IDB
+  // and save after fresh renders. First-ever visit still pays the render
+  // cost; all subsequent visits go from 0% → 100% on the boot bar in a
+  // frame or two. If IDB is unavailable (private-browsing Safari, quota
+  // exhausted, user agent denies), operations silently no-op and behavior
+  // falls back to v43 (render every session).
+  //
+  // Why this is different from v34's HTML5 engine: no setTimeout scheduling
+  // (so no jitter), no short-sample pooling (so no boundary stutter), one
+  // continuous file means playback tight at all tempos within the rate
+  // window. Cost: 10-min session cap per file, ~4-5s first-ever-visit render.
 
-    function initPool(soundName) {
-      if (pools[soundName]) return;
-      const srcs = SAMPLE_SRCS[soundName];
-      pools[soundName] = { accent: [], regular: [] };
-      poolIdx[soundName] = { accent: 0, regular: 0 };
-      for (let i = 0; i < POOL_SIZE; i++) {
-        const a = new Audio(srcs.accent); a.preload = 'auto';
-        a.setAttribute('playsinline', '');
-        pools[soundName].accent.push(a);
-        const r = new Audio(srcs.regular); r.preload = 'auto';
-        r.setAttribute('playsinline', '');
-        pools[soundName].regular.push(r);
-      }
+  // --- IndexedDB blob cache ---
+  // Minimal wrapper: get/put keyed by configKey, stores Blob directly.
+  // Returns null on any failure — callers are expected to handle cache
+  // misses the same as "not in DB." The cache version is baked into the
+  // object-store upgrade path; bumping DB_VERSION wipes the store, which
+  // we use to invalidate stale renders if we ever change sound recipes
+  // or file duration.
+  const blobDB = (function () {
+    const DB_NAME = 't0ck-cache';
+    const DB_VERSION = 1;
+    const STORE = 'renders';
+    let dbPromise = null;
+
+    function openDB() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise(function (resolve) {
+        try {
+          if (typeof indexedDB === 'undefined') { resolve(null); return; }
+          const req = indexedDB.open(DB_NAME, DB_VERSION);
+          req.onupgradeneeded = function () {
+            const db = req.result;
+            if (db.objectStoreNames.contains(STORE)) {
+              db.deleteObjectStore(STORE);  // wipes stale entries on version bump
+            }
+            db.createObjectStore(STORE);
+          };
+          req.onsuccess = function () { resolve(req.result); };
+          req.onerror   = function () { resolve(null); };
+          req.onblocked = function () { resolve(null); };
+        } catch (e) { resolve(null); }
+      });
+      return dbPromise;
     }
 
     return {
-      name: 'html5-audio',
-      init: function () {
-        // Pre-initialize all four sound pools. Only on first call; subsequent
-        // calls are no-ops. Keeps initial load fast: audio elements don't
-        // start loading their data URIs until first preload tick.
-        Object.keys(SAMPLE_SRCS).forEach(initPool);
+      get: async function (key) {
+        try {
+          const db = await openDB();
+          if (!db) return null;
+          return await new Promise(function (resolve) {
+            try {
+              const tx = db.transaction(STORE, 'readonly');
+              const req = tx.objectStore(STORE).get(key);
+              req.onsuccess = function () {
+                const val = req.result;
+                resolve((val instanceof Blob) ? val : null);
+              };
+              req.onerror = function () { resolve(null); };
+            } catch (e) { resolve(null); }
+          });
+        } catch (e) { return null; }
       },
-      now: function () { return performance.now(); },
-      play: function (soundName, accent, timeMs) {
-        initPool(soundName);
-        // Map Web Audio accent categories to simpler accent/regular binary
-        // for HTML5: 'down' = accent, 'main'/'sub' = regular (volume handled
-        // via Audio.volume for sub).
-        const bucket = accent === 'down' ? 'accent' : 'regular';
-        const p = pools[soundName];
-        const idx = poolIdx[soundName][bucket];
-        poolIdx[soundName][bucket] = (idx + 1) % POOL_SIZE;
-        const a = p[bucket][idx];
-        // Subdivision clicks are quieter than main beats for rhythmic clarity.
-        a.volume = accent === 'sub' ? 0.4 : 1.0;
-        const delay = Math.max(0, timeMs - performance.now());
-        setTimeout(function () {
-          if (!isPlaying) return;
-          // Jitter = how far the actual fire time is from the scheduled
-          // time. This is the real scheduling-precision metric, not the
-          // look-ahead window we accidentally measured in v32.
-          recordJitter(timeMs, performance.now());
-          try {
-            a.currentTime = 0;
-            const pr = a.play();
-            if (pr && typeof pr.catch === 'function') pr.catch(function(){});
-          } catch (e) {}
-        }, delay);
+      put: async function (key, blob) {
+        try {
+          const db = await openDB();
+          if (!db) return;
+          return await new Promise(function (resolve) {
+            try {
+              const tx = db.transaction(STORE, 'readwrite');
+              const req = tx.objectStore(STORE).put(blob, key);
+              req.onsuccess = function () { resolve(); };
+              req.onerror   = function () { resolve(); };
+            } catch (e) { resolve(); }
+          });
+        } catch (e) { return; }
       }
+    };
+  })();
+
+  const RenderedFileEngine = (function () {
+    const SR = 44100;
+    const DURATION_SEC = 600;      // 10-minute files
+    const CLICK_PAD_MS = 80;       // template buffer length — covers longest envelope (beep 80ms)
+    const BASES = [160, 320];
+    const SOUND_NAMES = ['sine', 'wood', 'tick', 'beep'];
+
+    // Sound recipes — mirror of WebAudioEngine's SOUNDS, but parameterized
+    // on ctx so they can render into an OfflineAudioContext. Kept identical
+    // to v24 recipes; the only difference is ctx is injected, not captured.
+    const SOUND_RECIPES = {
+      sine: function (ctx, time, accent) {
+        const p = { down: { freq: 1600, gain: 0.55 }, main: { freq: 800, gain: 0.40 }, sub: { freq: 800, gain: 0.16 } }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.002);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+        osc.start(time); osc.stop(time + 0.05);
+      },
+      wood: function (ctx, time, accent) {
+        const p = { down: { freq: 2000, target: 1000, gain: 0.50 }, main: { freq: 1200, target: 600, gain: 0.38 }, sub: { freq: 1200, target: 600, gain: 0.14 } }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'triangle'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.frequency.exponentialRampToValueAtTime(p.target, time + 0.012);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.001);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + 0.025);
+        osc.start(time); osc.stop(time + 0.035);
+      },
+      tick: function (ctx, time, accent) {
+        const p = { down: { freq: 5000, gain: 0.30, dur: 0.020 }, main: { freq: 3500, gain: 0.24, dur: 0.018 }, sub: { freq: 3500, gain: 0.09, dur: 0.012 } }[accent];
+        const nbuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.05), ctx.sampleRate);
+        const ndata = nbuf.getChannelData(0);
+        for (let i = 0; i < ndata.length; i++) ndata[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource(); src.buffer = nbuf;
+        const filter = ctx.createBiquadFilter(); filter.type = 'bandpass';
+        filter.frequency.value = p.freq; filter.Q.value = 3;
+        const env = ctx.createGain();
+        src.connect(filter); filter.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.001);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + p.dur);
+        src.start(time); src.stop(time + p.dur + 0.01);
+      },
+      beep: function (ctx, time, accent) {
+        const p = { down: { freq: 1200, gain: 0.40, dur: 0.08 }, main: { freq: 880, gain: 0.30, dur: 0.08 }, sub: { freq: 880, gain: 0.11, dur: 0.06 } }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.003);
+        env.gain.setValueAtTime(p.gain, time + p.dur * 0.35);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + p.dur);
+        osc.start(time); osc.stop(time + p.dur + 0.01);
+      }
+    };
+
+    // Click template cache: Map<'sound|accent', Float32Array>
+    const clickTemplates = new Map();
+    let templatesReady = false;
+
+    // Full-file cache: Map<configKey, { blob, url, base }>
+    const fileCache = new Map();
+
+    // Render queue (FIFO with queue-jump support)
+    const renderQueue = [];
+    let currentJob = null;
+    const statusListeners = [];
+    let sessionEndedCb = null;
+
+    // Playback state
+    let audioEl = null;
+    let currentConfigKey = null;
+    let currentBase = null;
+    let playing = false;
+    let bootProgress = 0;
+    let pendingSwap = null;
+    // startIntent: true between the user's Start tap and a corresponding
+    // Stop. Async play callbacks check this before calling audio.play(),
+    // so a user who stops while a render is still in flight doesn't get
+    // surprised by audio starting late.
+    let startIntent = false;
+    const swapCompleteListeners = [];
+
+    function configKey(sound, sig, sub, accent, base) {
+      return sound + '|' + sig + '|' + sub + '|' + accent + '|' + base;
+    }
+    function baseForBpm(bpm) { return bpm <= 160 ? 160 : 320; }
+    function yieldToUI() { return new Promise(function (r) { setTimeout(r, 0); }); }
+    function notifyStatus() {
+      for (var i = 0; i < statusListeners.length; i++) {
+        try { statusListeners[i](); } catch (e) {}
+      }
+    }
+
+    // Render all 12 click templates (4 sounds × 3 accents) via short
+    // OfflineAudioContext renders. ~100ms each, cheap. Cached for life.
+    async function buildClickTemplates(onProgress) {
+      if (templatesReady) return;
+      const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      const padSamples = Math.ceil(SR * (CLICK_PAD_MS / 1000));
+      const accents = ['down', 'main', 'sub'];
+      const total = SOUND_NAMES.length * accents.length;
+      let done = 0;
+      for (let si = 0; si < SOUND_NAMES.length; si++) {
+        const sound = SOUND_NAMES[si];
+        for (let ai = 0; ai < accents.length; ai++) {
+          const accent = accents[ai];
+          const ctx = new OAC(1, padSamples, SR);
+          SOUND_RECIPES[sound](ctx, 0, accent);
+          const buf = await ctx.startRendering();
+          clickTemplates.set(sound + '|' + accent, new Float32Array(buf.getChannelData(0)));
+          done++;
+          if (onProgress) onProgress('templates', done / total);
+          await yieldToUI();
+        }
+      }
+      templatesReady = true;
+    }
+
+    // Render a full 10-minute file for one config. Pastes click templates
+    // into a Float32Array at each beat/sub-beat position, clamps, encodes.
+    // onProgress(stage, fraction) is optional; called for 'render' and
+    // 'encode' stages during Phase-1 boot so the UI can show climbing %.
+    async function renderFile(config, onProgress) {
+      await buildClickTemplates(onProgress);
+      const sound = config.sound;
+      const stepsPerBeatVal = SUB_MAP[config.sub];
+      const sigBeats = SIG_BEATS[config.sig];
+      const stepsPerMeasure = sigBeats * stepsPerBeatVal;
+      const stepSec = (60 / config.base) / stepsPerBeatVal;
+      const totalSteps = Math.floor(DURATION_SEC / stepSec);
+      const totalSamples = SR * DURATION_SEC;
+      const samples = new Float32Array(totalSamples);
+
+      const tmplDown = clickTemplates.get(sound + '|down');
+      const tmplMain = clickTemplates.get(sound + '|main');
+      const tmplSub  = clickTemplates.get(sound + '|sub');
+
+      for (let i = 0; i < totalSteps; i++) {
+        const step = i % stepsPerMeasure;
+        const isMainBeat = step % stepsPerBeatVal === 0;
+        const isDownbeat = step === 0;
+        const tmpl = (isDownbeat && config.accent === 'on') ? tmplDown : (isMainBeat ? tmplMain : tmplSub);
+        const startSample = Math.floor(i * stepSec * SR);
+        const maxJ = Math.min(tmpl.length, totalSamples - startSample);
+        for (let j = 0; j < maxJ; j++) {
+          samples[startSample + j] += tmpl[j];
+        }
+        if (i > 0 && i % 200 === 0) {
+          if (onProgress) onProgress('render', i / totalSteps);
+          await yieldToUI();
+        }
+      }
+
+      // Clamp (overlapping templates at high subdivisions can exceed ±1)
+      for (let i = 0; i < samples.length; i++) {
+        if (samples[i] > 1) samples[i] = 1;
+        else if (samples[i] < -1) samples[i] = -1;
+      }
+      return await encodeMP3(samples, onProgress);
+    }
+
+    async function encodeMP3(channelData, onProgress) {
+      if (typeof lamejs === 'undefined') {
+        throw new Error('lamejs not loaded — check network');
+      }
+      const int16 = new Int16Array(channelData.length);
+      for (let i = 0; i < channelData.length; i++) {
+        const s = channelData[i];
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      const enc = new lamejs.Mp3Encoder(1, SR, 128);
+      const chunks = [];
+      const blockSize = 1152;
+      let updateCounter = 0;
+      for (let i = 0; i < int16.length; i += blockSize) {
+        const part = int16.subarray(i, i + blockSize);
+        const out = enc.encodeBuffer(part);
+        if (out.length > 0) chunks.push(out);
+        updateCounter++;
+        // Report progress every ~100 blocks (~25-30 updates over encode).
+        // Balances smoothness vs yield overhead; yields on every update.
+        if (updateCounter % 100 === 0) {
+          if (onProgress) onProgress('encode', i / int16.length);
+          await yieldToUI();
+        }
+      }
+      const tail = enc.flush();
+      if (tail.length > 0) chunks.push(tail);
+      if (onProgress) onProgress('encode', 1);
+      return new Blob(chunks, { type: 'audio/mp3' });
+    }
+
+    function findInQueue(key) {
+      for (let i = 0; i < renderQueue.length; i++) {
+        const c = renderQueue[i];
+        if (configKey(c.sound, c.sig, c.sub, c.accent, c.base) === key) return i;
+      }
+      return -1;
+    }
+
+    function enqueue(config, opts) {
+      opts = opts || {};
+      const key = configKey(config.sound, config.sig, config.sub, config.accent, config.base);
+      if (fileCache.has(key)) return Promise.resolve(fileCache.get(key));
+      if (currentJob && configKey(currentJob.sound, currentJob.sig, currentJob.sub, currentJob.accent, currentJob.base) === key) {
+        return waitForConfig(key);
+      }
+      const existing = findInQueue(key);
+      if (existing >= 0) {
+        if (opts.front && existing > 0) {
+          const item = renderQueue.splice(existing, 1)[0];
+          renderQueue.unshift(item);
+          notifyStatus();
+        }
+      } else {
+        if (opts.front) renderQueue.unshift(config);
+        else renderQueue.push(config);
+        notifyStatus();
+      }
+      processQueue();
+      return waitForConfig(key);
+    }
+
+    function waitForConfig(key) {
+      return new Promise(function (resolve) {
+        if (fileCache.has(key)) { resolve(fileCache.get(key)); return; }
+        const checker = function () {
+          if (fileCache.has(key)) {
+            const idx = statusListeners.indexOf(checker);
+            if (idx >= 0) statusListeners.splice(idx, 1);
+            resolve(fileCache.get(key));
+          }
+        };
+        statusListeners.push(checker);
+      });
+    }
+
+    async function processQueue() {
+      if (currentJob) return;
+      while (renderQueue.length > 0) {
+        currentJob = renderQueue.shift();
+        notifyStatus();
+        try {
+          const key = configKey(currentJob.sound, currentJob.sig, currentJob.sub, currentJob.accent, currentJob.base);
+          // IDB hit path — skip render, just populate in-memory cache.
+          let blob = await blobDB.get(key);
+          if (!blob) {
+            blob = await renderFile(currentJob);
+            blobDB.put(key, blob);  // fire-and-forget persist
+          }
+          const url = URL.createObjectURL(blob);
+          fileCache.set(key, { blob: blob, url: url, base: currentJob.base });
+        } catch (e) {
+          console.error('render failed:', e);
+        }
+        currentJob = null;
+        notifyStatus();
+      }
+    }
+
+    async function bootPhases(initial) {
+      const p1Key = configKey(initial.sound, initial.sig, initial.sub, initial.accent, initial.base);
+
+      // IDB hit path — skip render entirely. This is what makes reloads
+      // feel instant after the first-ever visit. Progress jumps straight
+      // to 100 so the loading UI flashes briefly rather than sitting at 0.
+      const cachedBlob = await blobDB.get(p1Key);
+      if (cachedBlob) {
+        const url = URL.createObjectURL(cachedBlob);
+        fileCache.set(p1Key, { blob: cachedBlob, url: url, base: initial.base });
+        bootProgress = 100; notifyStatus();
+        queueNeighborhoodRenders(initial);
+        const otherBaseA = initial.base === 160 ? 320 : 160;
+        queueNeighborhoodRenders({ ...initial, base: otherBaseA });
+        return;
+      }
+
+      // IDB miss — render from scratch with the familiar progress bar.
+      const onProgress = function (stage, frac) {
+        if (frac > 1) frac = 1;
+        else if (frac < 0) frac = 0;
+        let pct = bootProgress;
+        if (stage === 'templates')   pct = Math.round(frac * 10);
+        else if (stage === 'render') pct = Math.round(10 + frac * 10);
+        else if (stage === 'encode') pct = Math.round(20 + frac * 80);
+        if (pct > bootProgress && pct < 100) {
+          bootProgress = pct;
+          notifyStatus();
+        }
+      };
+
+      bootProgress = 1; notifyStatus();
+      const blob = await renderFile(initial, onProgress);
+      const url = URL.createObjectURL(blob);
+      fileCache.set(p1Key, { blob: blob, url: url, base: initial.base });
+      blobDB.put(p1Key, blob);
+      bootProgress = 100; notifyStatus();
+
+      // Background neighborhoods: one at the current base, one at the
+      // other base. Each neighborhood is every single-axis variation of
+      // the given config (other sounds / other subs / other accent).
+      // Re-run after every swap so the "center" of the pre-rendered
+      // region follows the user's current config.
+      queueNeighborhoodRenders(initial);
+      const otherBase = initial.base === 160 ? 320 : 160;
+      queueNeighborhoodRenders({ ...initial, base: otherBase });
+    }
+
+    // Queue all single-axis neighbors of a config for background render.
+    // "Single-axis" means: vary one of {sound, sub, accent} while keeping
+    // the others constant. Sig changes are omitted intentionally — users
+    // tend to stick with one time signature per practice session, so the
+    // render cost isn't worth the speculative coverage. Accept the 4s
+    // render cost on first sig change; it'll be cached for the rest of
+    // the session. Dedup in enqueue() makes this safe to call after
+    // every swap (already-cached configs skip).
+    function queueNeighborhoodRenders(config) {
+      const SUB_VALUES = Object.keys(SUB_MAP);
+      // Other sounds at this (sig, sub, accent, base)
+      for (let i = 0; i < SOUND_NAMES.length; i++) {
+        const s = SOUND_NAMES[i];
+        if (s !== config.sound) {
+          enqueue({ sound: s, sig: config.sig, sub: config.sub, accent: config.accent, base: config.base });
+        }
+      }
+      // Other subs at this (sound, sig, accent, base)
+      for (let i = 0; i < SUB_VALUES.length; i++) {
+        const sv = SUB_VALUES[i];
+        if (sv !== config.sub) {
+          enqueue({ sound: config.sound, sig: config.sig, sub: sv, accent: config.accent, base: config.base });
+        }
+      }
+      // Other accent (on ↔ off)
+      const otherAccent = config.accent === 'on' ? 'off' : 'on';
+      enqueue({ sound: config.sound, sig: config.sig, sub: config.sub, accent: otherAccent, base: config.base });
+    }
+
+    function ensureAudioEl() {
+      if (!audioEl) {
+        audioEl = new Audio();
+        audioEl.setAttribute('playsinline', '');
+        try { audioEl.preservesPitch = false; } catch (e) {}
+        try { audioEl.mozPreservesPitch = false; } catch (e) {}
+        try { audioEl.webkitPreservesPitch = false; } catch (e) {}
+        audioEl.addEventListener('ended', function () {
+          playing = false;
+          if (sessionEndedCb) sessionEndedCb();
+        });
+      }
+      return audioEl;
+    }
+
+    function playLoaded(key, base, bpm) {
+      const entry = fileCache.get(key);
+      if (!entry) return false;
+      const a = ensureAudioEl();
+      a.src = entry.url;
+      a.currentTime = 0;
+      a.playbackRate = bpm / base;
+      currentConfigKey = key;
+      currentBase = base;
+      playing = true;
+      const p = a.play();
+      if (p && p.catch) p.catch(function (err) { console.error('play failed:', err); });
+      return true;
+    }
+
+    // Perform the actual file swap. Used both from tick() (boundary or
+    // immediate condition lands) and directly from onConfigChange when
+    // the new file is already cached and the change requested immediate
+    // swap. Assumes pendingSwap is set and its key is in fileCache.
+    // Notifies swapCompleteListeners at the end.
+    function performSwap() {
+      if (!pendingSwap || !audioEl) return;
+      if (!fileCache.has(pendingSwap.key)) return;
+      const entry = fileCache.get(pendingSwap.key);
+      const a = audioEl;
+      const newBase = pendingSwap.base;
+      const newBpm = pendingSwap.bpm;
+      try { a.pause(); } catch (e) {}
+      a.src = entry.url;
+      a.currentTime = 0;
+      a.playbackRate = newBpm / newBase;
+      currentConfigKey = pendingSwap.key;
+      currentBase = newBase;
+      pendingSwap = null;
+      const pp = a.play();
+      if (pp && pp.catch) pp.catch(function (err) { console.error('swap play:', err); });
+      for (var i = 0; i < swapCompleteListeners.length; i++) {
+        try { swapCompleteListeners[i](); } catch (e) {}
+      }
+      // Re-center the pre-render neighborhood on whatever we just swapped
+      // to. If the user changed sub, the neighborhood now includes the
+      // other sounds at this new sub, etc. Dedup in enqueue() means
+      // already-cached configs are skipped.
+      const parts = currentConfigKey.split('|');
+      queueNeighborhoodRenders({
+        sound: parts[0],
+        sig: parts[1],
+        sub: parts[2],
+        accent: parts[3],
+        base: parseInt(parts[4], 10)
+      });
+    }
+
+    return {
+      name: 'rendered-file',
+      iosMode: true,
+      getBootProgress: function () { return bootProgress; },
+
+      init: function (snap) {
+        // Returns the phase-1 promise. Resolves when first file is playable.
+        const base = baseForBpm(snap.bpm);
+        return bootPhases({
+          sound: snap.sound, sig: snap.sig, sub: snap.sub,
+          accent: snap.accent, base: base
+        });
+      },
+
+      start: function (snap) {
+        startIntent = true;
+        const base = baseForBpm(snap.bpm);
+        const key = configKey(snap.sound, snap.sig, snap.sub, snap.accent, base);
+        if (fileCache.has(key)) {
+          playLoaded(key, base, snap.bpm);
+          return;
+        }
+        // Queue-jump and wait. Gate on startIntent: if the user hits Stop
+        // before this resolves, don't sneak audio on after the fact.
+        enqueue({ sound: snap.sound, sig: snap.sig, sub: snap.sub, accent: snap.accent, base: base }, { front: true })
+          .then(function () {
+            if (!startIntent) return;
+            playLoaded(key, base, snap.bpm);
+          });
+      },
+
+      stop: function () {
+        startIntent = false;
+        if (audioEl) {
+          try { audioEl.pause(); audioEl.currentTime = 0; } catch (e) {}
+        }
+        playing = false;
+        pendingSwap = null;
+      },
+
+      onBpmChange: function (snap) {
+        if (!playing || !audioEl) return;
+        const newBase = baseForBpm(snap.bpm);
+        if (newBase === currentBase) {
+          audioEl.playbackRate = snap.bpm / currentBase;
+        } else {
+          // Cross-base: wait for next measure boundary so the tempo
+          // continuity feels musical. Users dragging BPM across the
+          // boundary are usually "playing along" with the metronome.
+          this.onConfigChange(snap, { immediate: false });
+        }
+      },
+
+      // opts.immediate: if true, swap happens as soon as the new file is
+      // available (no measure-boundary wait). Used for sound/sig/sub/accent
+      // changes — the user is exploring, not playing along, so waiting
+      // feels sluggish. If false (or omitted), waits for measure boundary,
+      // which is what cross-base BPM changes pass through here with.
+      onConfigChange: function (snap, opts) {
+        if (!playing || !audioEl) return;
+        opts = opts || {};
+        const newBase = baseForBpm(snap.bpm);
+        const newKey = configKey(snap.sound, snap.sig, snap.sub, snap.accent, newBase);
+        if (newKey === currentConfigKey) return;
+        pendingSwap = {
+          key: newKey,
+          base: newBase,
+          bpm: snap.bpm,
+          sigBeats: SIG_BEATS[snap.sig],
+          immediate: !!opts.immediate
+        };
+        if (!fileCache.has(newKey)) {
+          enqueue({ sound: snap.sound, sig: snap.sig, sub: snap.sub, accent: snap.accent, base: newBase }, { front: true });
+        }
+        // Immediate-path optimization: if the file is already cached,
+        // swap right now rather than waiting for the next animation frame.
+        // Shaves ~16ms off perceived latency for rapid settings changes.
+        if (opts.immediate && fileCache.has(newKey)) {
+          performSwap();
+        }
+      },
+
+      // Called each animation frame from drawLoop. Performs pending swap
+      // — immediately if pendingSwap.immediate is true and file is cached,
+      // otherwise at the next measure boundary. Returns { beat } for the
+      // visual pulse (or null if not playing).
+      tick: function (snap) {
+        if (!playing || !audioEl) return null;
+        const ct = audioEl.currentTime;
+        const sigBeats = SIG_BEATS[snap.sig];
+        const totalBeats = ct * currentBase / 60;
+        const beatIdx = Math.floor(totalBeats) % sigBeats;
+
+        if (pendingSwap && fileCache.has(pendingSwap.key)) {
+          if (pendingSwap.immediate) {
+            // Settings change path — swap now, don't wait for a boundary.
+            // Tiny audible blip on iOS as pause/src/play lands, but users
+            // exploring sounds/sigs want responsiveness over seamlessness.
+            performSwap();
+            return { beat: 0 };
+          }
+          // Cross-base BPM path — wait for measure boundary for a musical
+          // transition, which matters more when the user is "playing along."
+          const measuresElapsed = totalBeats / sigBeats;
+          const frac = measuresElapsed - Math.floor(measuresElapsed);
+          if (frac < 0.04) {
+            performSwap();
+            return { beat: 0 };
+          }
+        }
+        return { beat: beatIdx };
+      },
+
+      getSoundStatus: function (soundName, snap) {
+        const base = baseForBpm(snap.bpm);
+        const key = configKey(soundName, snap.sig, snap.sub, snap.accent, base);
+        if (fileCache.has(key)) return 'ready';
+        if (currentJob && configKey(currentJob.sound, currentJob.sig, currentJob.sub, currentJob.accent, currentJob.base) === key) {
+          return 'rendering';
+        }
+        if (findInQueue(key) >= 0) return 'queued';
+        return 'none';
+      },
+
+      // Subscribe to cache/queue status changes (settings UI).
+      onStatusChange: function (cb) { statusListeners.push(cb); },
+      onSwapComplete: function (cb) { swapCompleteListeners.push(cb); },
+      onSessionEnd: function (cb) { sessionEndedCb = cb; },
+
+      // True when we want to be making sound but aren't yet — either
+      // because a measure-boundary swap hasn't landed, or because the
+      // audio element is between files (pause → src swap → play → load).
+      // Main UI uses this to show a "catching up" pulse on the beat dots.
+      isCatchingUp: function () {
+        if (!playing) return false;
+        if (pendingSwap) return true;
+        if (audioEl && audioEl.paused) return true;
+        // readyState < HAVE_FUTURE_DATA (3) means the browser doesn't have
+        // enough data queued to play. On iOS this happens briefly right
+        // after an src swap until the new blob loads.
+        if (audioEl && audioEl.readyState < 3) return true;
+        return false;
+      },
+
+      // Describes what's changing during the catching-up state, so the
+      // UI can say "Changing sound…" or "Changing sound, time signature,
+      // and subdivision…" — grammatically correct regardless of how
+      // many fields the user just touched. Returns null when catching-up
+      // is generic (e.g., loading between files with no config change,
+      // or BPM crossed a base boundary with no other diff).
+      getCatchingUpText: function () {
+        if (!playing) return null;
+        if (pendingSwap && currentConfigKey) {
+          const cur = currentConfigKey.split('|');
+          const next = pendingSwap.key.split('|');
+          // Key format: sound|sig|sub|accent|base
+          const labels = ['sound', 'time signature', 'subdivision', 'accent'];
+          const changes = [];
+          for (let i = 0; i < labels.length; i++) {
+            if (cur[i] !== next[i]) changes.push(labels[i]);
+          }
+          if (changes.length === 0) return null;  // base-only (BPM crossed)
+          if (changes.length === 1) return 'Changing ' + changes[0] + '…';
+          if (changes.length === 2) return 'Changing ' + changes[0] + ' and ' + changes[1] + '…';
+          const last = changes.pop();
+          return 'Changing ' + changes.join(', ') + ', and ' + last + '…';
+        }
+        if (audioEl && (audioEl.paused || audioEl.readyState < 3)) {
+          return 'Loading…';
+        }
+        return null;
+      },
+
+      continueSession: function (snap) {
+        startIntent = true;
+        if (audioEl && currentConfigKey) {
+          try { audioEl.currentTime = 0; } catch (e) {}
+          audioEl.playbackRate = snap.bpm / currentBase;
+          playing = true;
+          const pp = audioEl.play();
+          if (pp && pp.catch) pp.catch(function (err) { console.error('continue:', err); });
+        }
+      },
+
+      // Legacy play() shim — WebAudioEngine is called per-tick via
+      // audioEngine.play(sound, accent, timeMs). RenderedFileEngine doesn't
+      // use per-tick playback; this is a no-op so settings-preview calls
+      // (which fire play() on the active engine) don't crash. Preview on
+      // iOS is skipped anyway since the point of changing sound on iOS is
+      // to trigger a file re-render, not audition a single click.
+      play: function () {},
+      init_webaudio: function () {}  // compatibility no-op
     };
   })();
 
@@ -1248,13 +2094,7 @@
     return false;
   }
 
-  let audioEngine = isIOS() ? HtmlAudioEngine : WebAudioEngine;
-
-  function detectBackend() {
-    // Initialize whichever backend was selected. No runtime switching —
-    // the selection is made once at first play attempt based on platform.
-    audioEngine.init();
-  }
+  let audioEngine = isIOS() ? RenderedFileEngine : WebAudioEngine;
 
   // Legacy SOUNDS shim — settings-change preview calls SOUNDS[state.sound].play()
   // to audition a sound. Route this through the active backend.
@@ -1278,88 +2118,22 @@
   const SCHEDULE_AHEAD_MS = 100;
   const visualQueue = [];
 
-  // Jitter tracking
-  const jitterWindow = [];
-  const JITTER_WINDOW_SIZE = 8;
-  let lastJitterMs = 0;
-  let consecutiveBadTicks = 0;
-  // Thresholds tuned for real-world conditions. v32 was too aggressive
-  // (80ms/5ticks) and triggered auto-stops during normal operation on
-  // iOS HTML5 audio. These values allow for the natural jitter of
-  // setTimeout-based scheduling without flagging healthy playback.
-  const BAD_TICK_JITTER_MS = 150;
-  const BAD_TICK_THRESHOLD = 10;
+  // Jitter tracking removed in v35: the HTML5 fallback that needed it is
+  // gone, and the rendered-file engine has no JS-observable timing drift
+  // (playback is driven by HTMLAudioElement, not setTimeout).
 
   function ensureCtx() {
-    detectBackend();
-  }
-
-  // Jitter indicator: updates the small colored dot in the header. Only
-  // shown while playing on the HTML5 backend (Web Audio uses sample-accurate
-  // scheduling with no JS-observable jitter, so the indicator is meaningless
-  // there). Color reflects worst recent jitter over the past
-  // JITTER_WINDOW_SIZE ticks. Thresholds are generous because setTimeout-
-  // based playback has inherent 10-30ms variance even on healthy devices;
-  // only flag truly problematic jitter.
-  function updateJitterIndicator() {
-    const dot = document.getElementById('jitterDot');
-    if (!dot) return;
-    const showDot = isPlaying && audioEngine === HtmlAudioEngine;
-    if (!showDot) { dot.classList.remove('active', 'good', 'marginal', 'bad'); dot.title = ''; return; }
-    dot.classList.add('active');
-    dot.classList.remove('good', 'marginal', 'bad');
-    let cls = 'good';
-    if (lastJitterMs > 80) cls = 'bad';
-    else if (lastJitterMs > 40) cls = 'marginal';
-    dot.classList.add(cls);
-    dot.title = 'Timing jitter: ' + Math.round(lastJitterMs) + ' ms';
-  }
-
-  // Called when sustained jitter exceeds BAD_TICK_JITTER_MS for
-  // BAD_TICK_THRESHOLD consecutive ticks. Metronome has auto-stopped;
-  // this alert explains why and gives the user guidance.
-  function showJitterAlert() {
-    const existing = document.getElementById('jitterAlert');
-    if (existing) return;  // already shown
-    const overlay = document.createElement('div');
-    overlay.id = 'jitterAlert';
-    overlay.className = 'jitter-alert';
-    overlay.innerHTML = '<div class="jitter-alert-inner">' +
-      '<div class="jitter-alert-title">Stopped — timing drifted</div>' +
-      '<div class="jitter-alert-body">Your device is struggling to keep precise time. ' +
-      'Try a lower BPM or simpler subdivision.</div>' +
-      '<button class="jitter-alert-ok" type="button">OK</button>' +
-      '</div>';
-    document.body.appendChild(overlay);
-    const ok = overlay.querySelector('.jitter-alert-ok');
-    function dismiss() { overlay.remove(); }
-    ok.addEventListener('click', dismiss);
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) dismiss(); });
-    setTimeout(function () { ok.focus(); }, 50);
+    // Web Audio engine needs init() called in a user-gesture handler so the
+    // AudioContext can start. RenderedFileEngine's first play is triggered
+    // from start(), which is called from a user click — same rule applies.
+    if (audioEngine.init && audioEngine !== RenderedFileEngine) {
+      audioEngine.init();
+    }
   }
 
   function stepsPerBeat() { return SUB_MAP[state.sub]; }
   function stepsPerMeasure() { return SIG_BEATS[state.sig] * stepsPerBeat(); }
   function msPerStep() { return (60000 / state.bpm) / stepsPerBeat(); }
-
-  function recordJitter(scheduledMs, actualMs) {
-    const j = Math.abs(actualMs - scheduledMs);
-    jitterWindow.push(j);
-    if (jitterWindow.length > JITTER_WINDOW_SIZE) jitterWindow.shift();
-    // Display jitter is the max of recent samples — worst-case, not average
-    lastJitterMs = Math.max.apply(null, jitterWindow);
-
-    if (j > BAD_TICK_JITTER_MS) {
-      consecutiveBadTicks++;
-      if (consecutiveBadTicks >= BAD_TICK_THRESHOLD && isPlaying) {
-        stop();
-        showJitterAlert();
-      }
-    } else {
-      consecutiveBadTicks = 0;
-    }
-    updateJitterIndicator();
-  }
 
   function scheduleClick(step, timeMs) {
     const spb = stepsPerBeat();
@@ -1369,9 +2143,6 @@
     const accent = (isDownbeat && accentActive) ? 'down' : isMainBeat ? 'main' : 'sub';
     audioEngine.play(state.sound, accent, timeMs);
     visualQueue.push({ step: step, time: timeMs, scheduledAt: timeMs });
-    // Jitter is measured inside the HTML5 backend's setTimeout callback
-    // (not here — here we're just scheduling, not playing). Web Audio has
-    // no observable jitter because it uses sample-accurate scheduling.
   }
 
   function advance() {
@@ -1386,30 +2157,51 @@
     }
   }
 
+  // --- engine-dispatching start/stop ---
+  // RenderedFileEngine handles its own playback (one continuous MP3 via
+  // HTMLAudioElement + playbackRate). WebAudioEngine uses the scheduler
+  // with per-tick play(). Visual pulse path also differs: rendered engine
+  // computes current beat from audio.currentTime; web audio engine uses
+  // the visualQueue populated by the scheduler.
   function start() {
+    if (audioEngine === RenderedFileEngine) {
+      isPlaying = true;
+      audioEngine.start(snapshotState());
+      el.play.textContent = 'Stop';
+      el.play.classList.add('playing');
+      requestAnimationFrame(drawLoop);
+      return;
+    }
     ensureCtx();
     isPlaying = true;
     currentStep = 0;
     nextTickTime = performance.now() + 60;
-    jitterWindow.length = 0;
-    consecutiveBadTicks = 0;
-    lastJitterMs = 0;
     schedulerTick = setInterval(scheduler, LOOKAHEAD_MS);
     el.play.textContent = 'Stop';
     el.play.classList.add('playing');
     requestAnimationFrame(drawLoop);
-    updateJitterIndicator();
   }
 
   function stop() {
     isPlaying = false;
-    if (schedulerTick) clearInterval(schedulerTick);
-    schedulerTick = null;
-    visualQueue.length = 0;
+    if (audioEngine === RenderedFileEngine) {
+      audioEngine.stop();
+    } else {
+      if (schedulerTick) clearInterval(schedulerTick);
+      schedulerTick = null;
+      visualQueue.length = 0;
+    }
     el.play.textContent = 'Start';
     el.play.classList.remove('playing');
+    if (el.beatsWrap) el.beatsWrap.classList.remove('catching-up');
+    if (el.catchUpStatus) el.catchUpStatus.classList.remove('show');
+    lastCatchingUp = false;
+    lastCatchUpText = null;
     clearBeatDots();
-    updateJitterIndicator();
+  }
+
+  function snapshotState() {
+    return { bpm: state.bpm, sig: state.sig, sub: state.sub, sound: state.sound, accent: state.accent };
   }
 
   function toggle() { isPlaying ? stop() : start(); }
@@ -1441,14 +2233,52 @@
     }
   }
 
+  // drawLoop — visual pulse for beat dots. Two paths:
+  //   - RenderedFileEngine: engine.tick() returns { beat } computed from
+  //     audio.currentTime × base / 60. This is also where measure-boundary
+  //     swaps are performed, so the animation frame also drives the swap.
+  //     Also reads engine.isCatchingUp() + engine.getCatchingUpText() and
+  //     applies the catching-up visual state: dim beats, breathing ring,
+  //     and status text line describing what's changing.
+  //   - WebAudioEngine: reads scheduled ticks from visualQueue (populated
+  //     by scheduler at schedule-time, consumed by drawLoop at play-time).
+  let lastRenderedBeat = -1;
+  let lastCatchingUp = false;
+  let lastCatchUpText = null;
   function drawLoop() {
     if (!isPlaying) return;
-    const now = performance.now();
-    const spb = stepsPerBeat();
-    while (visualQueue.length && visualQueue[0].time <= now) {
-      const q = visualQueue.shift();
-      if (q.step % spb === 0) {
-        flashBeat(q.step / spb);
+    if (audioEngine === RenderedFileEngine) {
+      const info = audioEngine.tick(snapshotState());
+      if (info) {
+        if (info.beat !== lastRenderedBeat) {
+          flashBeat(info.beat);
+          lastRenderedBeat = info.beat;
+        }
+      }
+      const catchingUp = audioEngine.isCatchingUp();
+      if (catchingUp !== lastCatchingUp) {
+        el.beatsWrap.classList.toggle('catching-up', catchingUp);
+        lastCatchingUp = catchingUp;
+      }
+      // Update status text when it changes. Null clears the line.
+      const text = catchingUp ? audioEngine.getCatchingUpText() : null;
+      if (text !== lastCatchUpText) {
+        if (text) {
+          el.catchUpStatus.textContent = text;
+          el.catchUpStatus.classList.add('show');
+        } else {
+          el.catchUpStatus.classList.remove('show');
+        }
+        lastCatchUpText = text;
+      }
+    } else {
+      const now = performance.now();
+      const spb = stepsPerBeat();
+      while (visualQueue.length && visualQueue[0].time <= now) {
+        const q = visualQueue.shift();
+        if (q.step % spb === 0) {
+          flashBeat(q.step / spb);
+        }
       }
     }
     requestAnimationFrame(drawLoop);
@@ -1516,14 +2346,41 @@
       // audio behavior. No need to reset currentStep — measure position
       // doesn't shift.
       renderBeats();
-    } else if (key === 'sound' && !isPlaying) {
+    } else if (key === 'sound' && !isPlaying && audioEngine !== RenderedFileEngine) {
       // Preview a downbeat so the user can audition. Suppressed while running
       // because the scheduler picks up the new sound on the next scheduled click
       // and a preview on top would sound like an off-grid extra click.
+      // Skipped on iOS (RenderedFileEngine) — the whole point of changing
+      // sound there is to trigger a file re-render with the new sound baked
+      // in. Preview via the Web Audio path would require starting an
+      // AudioContext that we've already established is muted on speaker.
       try {
         ensureCtx();
         audioEngine.play(value, 'down', performance.now() + 20);
       } catch (err) {}
+    }
+
+    // Notify engine so it can re-render / swap at measure boundary.
+    // Only RenderedFileEngine cares about this — Web Audio picks up the
+    // change naturally on the next scheduled click.
+    if (audioEngine === RenderedFileEngine) {
+      if (isPlaying) {
+        // Tap registered, but audio won't reflect it until the next
+        // measure boundary (and maybe longer if the config needs
+        // rendering first). Mark the button so the user sees we're
+        // working on it.
+        //
+        // Clear pending state from all siblings in this group first —
+        // if the user rapid-taps (Wood then Tick), the previously-tapped
+        // Wood button would otherwise keep shimmering after it's been
+        // deselected, making it ambiguous which tap the swap will honor.
+        // Only the current intended selection should show the shimmer.
+        group.querySelectorAll('.seg.render-pending').forEach(function (sib) {
+          sib.classList.remove('render-pending');
+        });
+        btn.classList.add('render-pending');
+      }
+      audioEngine.onConfigChange(snapshotState(), { immediate: true });
     }
   }
 
@@ -1674,6 +2531,135 @@
   renderBeats();
   updateSegments();
   persist();
+
+  // ---------- v35: iOS notice, session-end, sound-status UI ----------
+  // Wire up the rendered-file engine's user-facing affordances. No-ops on
+  // non-iOS paths — WebAudioEngine doesn't need any of this.
+
+  const iosNotice = document.getElementById('iosNotice');
+  const sessionEndNotice = document.getElementById('sessionEndNotice');
+  let iosNoticeDismissed = false;
+
+  function openNotice(n) {
+    n.classList.add('open');
+    n.setAttribute('aria-hidden', 'false');
+  }
+  function closeNotice(n) {
+    n.classList.remove('open');
+    n.setAttribute('aria-hidden', 'true');
+  }
+
+  // Sound status dots removed in v41. The prior pre-tap status indicator
+  // (updateSoundStatusUI) tried to preview cache state on each sound
+  // button; turned out to look off-brand and surface state the user
+  // hadn't asked about. .render-pending shimmer on actual tap is the
+  // real feedback channel.
+
+  if (audioEngine === RenderedFileEngine) {
+    // When a measure-boundary swap completes, all pending settings
+    // changes are now audible. Clear the pending shimmer on every
+    // segment button — a simple mass-clear is fine because the only
+    // buttons that could have pending state are the currently-selected
+    // ones in their groups, and after the swap they're now accurate.
+    audioEngine.onSwapComplete(function () {
+      document.querySelectorAll('.seg.render-pending').forEach(function (b) {
+        b.classList.remove('render-pending');
+      });
+    });
+
+    // Session-end: pause is already done inside engine (playing flag flipped
+    // by 'ended' listener). Show modal with Continue / Stop.
+    audioEngine.onSessionEnd(function () {
+      // Drop isPlaying so UI reflects stopped state
+      isPlaying = false;
+      el.play.textContent = 'Start';
+      el.play.classList.remove('playing');
+      clearBeatDots();
+      openNotice(sessionEndNotice);
+    });
+
+    document.getElementById('sessionEndContinue').addEventListener('click', function () {
+      closeNotice(sessionEndNotice);
+      isPlaying = true;
+      el.play.textContent = 'Stop';
+      el.play.classList.add('playing');
+      audioEngine.continueSession(snapshotState());
+      requestAnimationFrame(drawLoop);
+    });
+    document.getElementById('sessionEndStop').addEventListener('click', function () {
+      closeNotice(sessionEndNotice);
+      // isPlaying already false, UI already reset — just close
+    });
+
+    // iOS notice: show ONCE ever per device. Dismissal is persisted in
+    // localStorage so reloads don't re-nag the user. If localStorage is
+    // denied (private mode), falls back to showing every session —
+    // mildly annoying but not broken, and the user has a bigger problem
+    // in that browser anyway (their persisted render cache is also gone).
+    const IOS_NOTICE_KEY = 't0ck-ios-notice-dismissed';
+    function iosNoticeDismissedAlready() {
+      try { return localStorage.getItem(IOS_NOTICE_KEY) === '1'; }
+      catch (e) { return false; }
+    }
+    function markIosNoticeDismissed() {
+      try { localStorage.setItem(IOS_NOTICE_KEY, '1'); } catch (e) {}
+    }
+
+    const dismissBtn = document.getElementById('iosNoticeDismiss');
+    dismissBtn.addEventListener('click', function () {
+      markIosNoticeDismissed();
+      iosNoticeDismissed = true;
+      closeNotice(iosNotice);
+      bootRenderedEngine();
+    });
+
+    if (iosNoticeDismissedAlready()) {
+      // Already seen it — skip straight to boot. This is the path taken
+      // on every reload after the first-ever visit.
+      bootRenderedEngine();
+    } else {
+      // First-ever visit — show notice. Kicks off boot after dismissal.
+      requestAnimationFrame(function () { openNotice(iosNotice); });
+    }
+
+    // Boot the rendered engine: Phase 1 blocking render kicks off after
+    // notice dismissal. While rendering, the Play button shows a %.
+    // Start button is interactable but engine.start() will queue-jump
+    // internally if user hits it before Phase 1 completes.
+    function bootRenderedEngine() {
+      el.play.classList.add('booting');
+      el.play.innerHTML = 'Loading <span class="boot-pct">0%</span>';
+      const pctEl = el.play.querySelector('.boot-pct');
+      // bootDone latches the updateBoot listener so it stops touching the
+      // play button after the initial boot completes. Without this, every
+      // subsequent notifyStatus (e.g., when a settings change queues a
+      // re-render mid-playback) would re-run updateBoot, see pct === 100,
+      // and stomp el.play.textContent back to 'Start' — even while the
+      // metronome is actively playing. Subtle bug, visible symptom.
+      let bootDone = false;
+
+      function updateBoot() {
+        if (bootDone) return;
+        const pct = audioEngine.getBootProgress();
+        if (pctEl) pctEl.textContent = pct + '%';
+        if (pct >= 100) {
+          el.play.classList.remove('booting');
+          el.play.textContent = 'Start';
+          bootDone = true;
+        }
+      }
+      audioEngine.onStatusChange(updateBoot);
+
+      audioEngine.init(snapshotState()).then(function () {
+        updateBoot();
+      }).catch(function (err) {
+        console.error('boot failed:', err);
+        el.play.classList.remove('booting');
+        el.play.textContent = 'Start';
+        bootDone = true;
+      });
+    }
+  }
 })();
 </script>
 </body>
