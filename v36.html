@@ -1,0 +1,2289 @@
+<!DOCTYPE html>
+<html lang="en" style="background:#F9F9F9;color:#034D32">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>t0ck — simple metronome</title>
+
+<!-- SEO -->
+<meta name="description" content="t0ck is a focused web metronome. Tap tempo, time signatures, subdivisions, four click sounds. No ads, no sign-in, no app to install.">
+<meta name="theme-color" content="#F9F9F9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a1612" media="(prefers-color-scheme: dark)">
+
+<!-- Open Graph -->
+<meta property="og:title" content="t0ck — simple metronome">
+<meta property="og:description" content="Tap tempo, time signatures, subdivisions, four click sounds. No ads, no sign-in.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="0fam">
+<meta property="og:url" content="https://t0ck.app/">
+<meta property="og:image" content="https://t0ck.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="t0ck wordmark on a light green-gray background">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="t0ck — simple metronome">
+<meta name="twitter:description" content="Tap tempo, time signatures, subdivisions, four click sounds.">
+<meta name="twitter:image" content="https://t0ck.app/og.png">
+
+<!-- Favicon: dotted zero brand mark as inline SVG -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20fill%3D%22%23F9F9F9%22%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%226%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2210%22%20fill%3D%22none%22%20stroke%3D%22%23034D32%22%20stroke-width%3D%223%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%222.5%22%20fill%3D%22%23034D32%22%2F%3E%3C%2Fsvg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- MP3 encoder for iOS rendered-file audio path. Loaded early so it's ready
+     by the time the render pipeline kicks off. Non-iOS never hits the encode
+     path but the 70KB cost is negligible and keeps the fallback self-contained. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+<style>
+  :root {
+    --bg: #F9F9F9;
+    --ink: #034D32;
+    --accent: #028454;
+    --accent-bg: #E4F3EE;
+    --border: #C0DDD4;
+    --mint: #00BD78;
+    --muted: #5a7868;
+    /* Role-based vars so the play button and active segment can use their
+       own accent in dark mode without per-element @media overrides. */
+    --play-bg: #034D32;
+    --play-text: #F9F9F9;
+    --seg-active-text: #F9F9F9;
+  }
+
+  /* Dark palette shared between system-preference and manual-toggle paths. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0a1612;
+      --ink: #E4F3EE;
+      --accent: #00BD78;
+      --accent-bg: #0f2a1f;
+      --border: #1f3d2d;
+      --mint: #00BD78;
+      --muted: #7a9a8a;
+      --play-bg: #00BD78;
+      --play-text: #0a1612;
+      --seg-active-text: #0a1612;
+    }
+    :root:not([data-theme="light"]) html,
+    :root:not([data-theme="light"]) body {
+      background: #0a1612 !important;
+      color: #E4F3EE !important;
+    }
+  }
+
+  /* Manual dark override — wins over a system light preference. */
+  :root[data-theme="dark"] {
+    --bg: #0a1612;
+    --ink: #E4F3EE;
+    --accent: #00BD78;
+    --accent-bg: #0f2a1f;
+    --border: #1f3d2d;
+    --mint: #00BD78;
+    --muted: #7a9a8a;
+    --play-bg: #00BD78;
+    --play-text: #0a1612;
+    --seg-active-text: #0a1612;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Branded keyboard-focus rings. :focus-visible fires only for keyboard
+     navigation (tab key), not mouse clicks — so the rings don't appear
+     after every tap. 2px offset so the ring doesn't hug the element. */
+  *:focus { outline: none; }
+  *:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  /* Pill-shaped elements need a matching pill focus ring. */
+  .tap:focus-visible,
+  .play:focus-visible,
+  .settings-btn:focus-visible {
+    outline-offset: 3px;
+    border-radius: 999px;
+  }
+  .nudge:focus-visible,
+  .theme-toggle:focus-visible,
+  .modal-close:focus-visible {
+    border-radius: 50%;
+    outline-offset: 2px;
+  }
+  .seg:focus-visible {
+    outline-offset: 2px;
+    border-radius: 10px;
+  }
+
+  html, body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    /* Fallback for older browsers */
+    min-height: 100vh;
+    /* Dynamic viewport: adapts to browser chrome (toolbar) on iOS/Android
+       so the footer buttons never hide under the bottom bar. */
+    min-height: 100dvh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    /* Respect iOS safe area (home indicator bar) so footer buttons stay
+       above it on notched/bezel-less phones. Uses max() so desktop/other
+       platforms keep the standard 24px and mobile gets whatever the
+       system reports, whichever is bigger. */
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+    max-width: 560px;
+    margin: 0 auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .version {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  /* (v35) Removed jitter-indicator CSS — no longer needed since the
+     rendered-file engine has no JS-observable timing drift. */
+
+  .header-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .theme-toggle {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 120ms, color 120ms, border-color 120ms;
+  }
+
+  .theme-toggle:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .theme-toggle:active { transform: scale(0.92); }
+
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 28px;
+    padding: 32px 0;
+  }
+
+  .beats {
+    display: flex;
+    gap: 14px;
+    min-height: 18px;
+    align-items: center;
+  }
+
+  .beat-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1.5px solid var(--border);
+    transition: transform 80ms ease-out;
+  }
+
+  .beat-dot.downbeat { border-color: var(--accent); }
+
+  .beat-dot.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    transform: scale(1.35);
+  }
+
+  .beat-dot.active.downbeat {
+    background: var(--mint);
+    border-color: var(--mint);
+  }
+
+  .bpm-display {
+    text-align: center;
+    user-select: none;
+  }
+
+  .bpm-number {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 148px;
+    line-height: 0.9;
+    letter-spacing: -0.04em;
+    color: var(--ink);
+    background: none;
+    border: none;
+    outline: none;
+    width: 4ch;
+    text-align: center;
+    padding: 0;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  .bpm-number::-webkit-outer-spin-button,
+  .bpm-number::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .bpm-number:focus {
+    color: var(--accent);
+  }
+
+  .bpm-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  .bpm-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .nudge {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    width: 48px;
+    height: 48px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms;
+  }
+
+  .nudge:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .nudge:active { transform: scale(0.95); }
+
+  .tap {
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 10px 24px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms, color 120ms;
+  }
+
+  .tap:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .tap.flash {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+
+  .play {
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 18px 0;
+    width: 100%;
+    max-width: 320px;
+    background: var(--play-bg);
+    color: var(--play-text);
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 120ms, transform 80ms;
+  }
+
+  .play:hover { opacity: 0.92; }
+  .play:active { transform: scale(0.985); }
+
+  .play.playing {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  footer {
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .settings-btn + .settings-btn::before {
+    content: '·';
+    color: var(--border);
+    margin-right: 4px;
+    pointer-events: none;
+  }
+
+  .settings-btn {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .settings-btn:hover { color: var(--accent); }
+
+  .settings-btn .gear {
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+  }
+
+  .hint {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 8px;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 0.04em;
+  }
+
+  .hint kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    margin: 0 2px;
+  }
+
+  /* ---------- settings modal ---------- */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    transform: translateY(100%);
+    /* Transition transform AND visibility. visibility has a delay so on
+       close, the modal slides away first (260ms), then becomes hidden.
+       On open, the .open class overrides with delay: 0 so visibility
+       flips immediately and the slide-up animation plays while visible. */
+    transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1),
+                visibility 0s linear 260ms;
+    overflow-y: auto;
+    visibility: hidden;
+  }
+
+  .modal.open {
+    transform: translateY(0);
+    visibility: visible;
+    transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1),
+                visibility 0s linear 0s;
+  }
+
+  .modal-inner {
+    max-width: 560px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+  }
+
+  .modal-title {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .modal-close {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink);
+    font-family: 'Space Mono', monospace;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background 120ms, border-color 120ms;
+  }
+
+  .modal-close:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    /* Auto top + bottom margins would center the body geometrically,
+       but true geometric center reads as slightly bottom-heavy on tall
+       viewports. Adding padding-bottom makes the body taller, which
+       shrinks the auto margins, which pulls the visible content UP.
+       Half the padding-bottom translates to the visual nudge amount
+       (96px padding → ~48px upward shift). Past the standard optical-
+       centering range, but the body is small relative to a tall
+       viewport — small blocks need stronger biases to feel centered.
+       On short viewports where auto margins are already 0, padding-bottom
+       just reads as trailing whitespace and the layout stays natural. */
+    margin-top: auto;
+    margin-bottom: auto;
+    padding-bottom: 96px;
+    width: 100%;
+  }
+
+  .group-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .segments {
+    display: flex;
+    gap: 8px;
+  }
+
+  .seg {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 14px 4px;
+    min-height: 48px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms, color 120ms, transform 80ms;
+  }
+
+  .seg:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+  }
+
+  .seg:active { transform: scale(0.96); }
+
+  .seg.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--seg-active-text);
+  }
+
+  .modal-footer-note {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    padding-top: 24px;
+    letter-spacing: 0.03em;
+  }
+
+  /* text-wrap: pretty balances line breaks and avoids widows/orphans on
+     the last line. Supported in Chromium 117+ / Safari 17.4+ / Firefox
+     coming. Non-supporting browsers silently fall back to normal wrap. */
+  .help-lead,
+  .help-note,
+  .help-about,
+  .modal-footer-note {
+    text-wrap: pretty;
+  }
+
+  /* ---------- help modal content ---------- */
+  .keymap, .urlmap {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 10px 20px;
+    align-items: center;
+  }
+
+  .keymap dt,
+  .urlmap dt {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    color: var(--ink);
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .keymap dd,
+  .urlmap dd {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .urlmap dt code {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    background: var(--accent-bg);
+    color: var(--ink);
+    padding: 3px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+  }
+
+  .help-lead {
+    font-size: 13px;
+    color: var(--ink);
+    margin-bottom: 14px;
+    line-height: 1.5;
+  }
+
+  .help-note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+    line-height: 1.5;
+  }
+
+  .help-note code {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    background: var(--accent-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  .help-about {
+    font-size: 13px;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+
+  .help-about a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid var(--border);
+    transition: border-color 120ms;
+  }
+
+  .help-about a:hover { border-bottom-color: var(--accent); }
+
+  @media (max-width: 420px) {
+    .bpm-number { font-size: 112px; }
+    body { padding: 18px; }
+    .modal-inner { padding: 18px; }
+    .seg { padding: 11px 3px; min-height: 44px; font-size: 12px; }
+    .segments { gap: 6px; }
+  }
+
+  /* ---------- v35 rendered-file engine UI ---------- */
+
+  /* Per-sound status indicator in the Settings > Sound row.
+     Shown only on iOS (rendered-file engine). Desktop stays clean. */
+  .seg[data-value] { position: relative; }
+  .seg .sound-status {
+    position: absolute;
+    top: 4px; right: 5px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 120ms ease, background 120ms ease;
+  }
+  .seg .sound-status.show { opacity: 1; }
+  .seg .sound-status.ready   { background: var(--mint); }
+  .seg .sound-status.queued  { background: var(--muted); }
+  .seg .sound-status.rendering {
+    background: var(--accent);
+    animation: pulse-dot 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 1; }
+  }
+
+  /* Disabled-while-rendering state for segment buttons. Tap is queued but
+     the button itself won't activate until the render lands. */
+  .seg.render-pending {
+    cursor: wait;
+    position: relative;
+  }
+  .seg.render-pending::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: repeating-linear-gradient(
+      45deg,
+      transparent 0, transparent 6px,
+      rgba(0,0,0,0.04) 6px, rgba(0,0,0,0.04) 7px
+    );
+    pointer-events: none;
+  }
+
+  /* Notice modal shown once on iOS first-load (and session-end modal reuses
+     the same styling). Uses the v34 .modal chrome but with a centered card
+     instead of the full-screen slide-up. */
+  .notice {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 22, 18, 0.52);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 24px;
+    opacity: 0;
+    transition: opacity 200ms ease;
+  }
+  .notice.open { display: flex; opacity: 1; }
+
+  .notice-card {
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 26px 24px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    text-wrap: pretty;
+  }
+
+  .notice-icon {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  .notice-title {
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    margin: 0 0 10px 0;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  .notice-body {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--ink);
+    margin-bottom: 22px;
+  }
+
+  .notice-body p { margin: 0 0 10px 0; }
+  .notice-body p:last-child { margin-bottom: 0; }
+  .notice-body .small {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+  }
+
+  .notice-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .notice-btn {
+    flex: 1;
+    padding: 13px 12px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 120ms ease;
+  }
+  .notice-btn:hover { background: var(--accent-bg); }
+  .notice-btn.primary {
+    background: var(--play-bg);
+    color: var(--play-text);
+    border-color: var(--play-bg);
+  }
+  .notice-btn.primary:hover { filter: brightness(1.08); }
+  .notice-btn:active { transform: scale(0.98); }
+  .notice-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Inline boot progress shown on iOS while Phase 1 renders. Replaces the
+     Start button's text until the first file is ready. */
+  .play.booting {
+    pointer-events: none;
+    opacity: 0.7;
+  }
+  .play .boot-pct {
+    display: inline-block;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.82em;
+    letter-spacing: 0.08em;
+    margin-left: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .modal { transition: none; }
+    .beat-dot { transition: none; }
+  }
+</style>
+</head>
+<body style="background:#F9F9F9;color:#034D32">
+
+<header>
+  <div class="brand">t0ck</div>
+  <div class="header-meta">
+    <span class="version">v36 · 20260424</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
+  </div>
+</header>
+
+<main>
+  <div class="beats" id="beats"></div>
+
+  <div class="bpm-display">
+    <input
+      class="bpm-number"
+      id="bpm"
+      type="number"
+      min="40"
+      max="320"
+      value="120"
+      inputmode="numeric"
+    >
+    <div class="bpm-label">BPM</div>
+  </div>
+
+  <div class="bpm-controls">
+    <button class="nudge" id="minus" aria-label="Decrease BPM">−</button>
+    <button class="tap" id="tap">Tap tempo</button>
+    <button class="nudge" id="plus" aria-label="Increase BPM">+</button>
+  </div>
+
+  <button class="play" id="play">Start</button>
+
+  <div class="hint">
+    <kbd>space</kbd> play/stop · <kbd>↑</kbd><kbd>↓</kbd> BPM · <kbd>T</kbd> tap
+  </div>
+</main>
+
+<footer>
+  <button class="settings-btn" id="openSettings">
+    <span class="gear">◉</span> Settings
+  </button>
+  <button class="settings-btn" id="openHelp">
+    <span class="gear">?</span> Help
+  </button>
+</footer>
+
+<!-- ---------- settings modal ---------- -->
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
+  <div class="modal-inner">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modalTitle">Settings</h2>
+      <button class="modal-close" id="closeSettings" aria-label="Close settings">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="group">
+        <div class="group-label">Time signature</div>
+        <div class="segments" data-group="sig" role="radiogroup" aria-label="Time signature">
+          <button class="seg" data-value="4/4" role="radio">4/4</button>
+          <button class="seg" data-value="3/4" role="radio">3/4</button>
+          <button class="seg" data-value="6/8" role="radio">6/8</button>
+          <button class="seg" data-value="2/4" role="radio">2/4</button>
+          <button class="seg" data-value="5/4" role="radio">5/4</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-label">Subdivision</div>
+        <div class="segments" data-group="sub" role="radiogroup" aria-label="Subdivision">
+          <button class="seg" data-value="off" role="radio">Off</button>
+          <button class="seg" data-value="8" role="radio">8ths</button>
+          <button class="seg" data-value="16" role="radio">16ths</button>
+          <button class="seg" data-value="3" role="radio">Triplets</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-label">Sound</div>
+        <div class="segments" data-group="sound" role="radiogroup" aria-label="Sound">
+          <button class="seg" data-value="sine" role="radio">Sine</button>
+          <button class="seg" data-value="wood" role="radio">Wood</button>
+          <button class="seg" data-value="tick" role="radio">Tick</button>
+          <button class="seg" data-value="beep" role="radio">Beep</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-label">First beat</div>
+        <div class="segments" data-group="accent" role="radiogroup" aria-label="First beat accent">
+          <button class="seg" data-value="on" role="radio">Accent</button>
+          <button class="seg" data-value="off" role="radio">Flat</button>
+        </div>
+      </div>
+
+      <div class="modal-footer-note">
+        Changes apply live. Close when you're done.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- help modal ---------- -->
+<div class="modal" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle" aria-hidden="true">
+  <div class="modal-inner">
+    <div class="modal-header">
+      <h2 class="modal-title" id="helpTitle">Help</h2>
+      <button class="modal-close" id="closeHelp" aria-label="Close help">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="group">
+        <div class="group-label">Keyboard shortcuts</div>
+        <dl class="keymap">
+          <dt><kbd>space</kbd></dt>             <dd>Start / stop</dd>
+          <dt><kbd>↑</kbd> <kbd>↓</kbd></dt>    <dd>Nudge BPM</dd>
+          <dt><kbd>T</kbd></dt>                 <dd>Tap tempo (4 taps averaged)</dd>
+          <dt><kbd>S</kbd></dt>                 <dd>Open settings</dd>
+          <dt><kbd>?</kbd></dt>                 <dd>Open help</dd>
+          <dt><kbd>esc</kbd></dt>               <dd>Close any dialog</dd>
+        </dl>
+      </div>
+
+      <div class="group">
+        <div class="group-label">Bookmarkable URLs</div>
+        <p class="help-lead">Every URL carries a tempo. Bookmark different tempos and open whichever you need.</p>
+        <dl class="urlmap">
+          <dt><code>t0ck.app/90</code></dt>              <dd>90 BPM</dd>
+          <dt><code>t0ck.app/140/3-4</code></dt>         <dd>140 BPM, 3/4 time</dd>
+          <dt><code>t0ck.app/60/4-4/8</code></dt>        <dd>60 BPM, 4/4, 8th-note subdivisions</dd>
+          <dt><code>t0ck.app/90/3-4/8/wood</code></dt>   <dd>Full recall — tempo, time, subs, sound</dd>
+          <dt><code>t0ck.app/90/flat</code></dt>         <dd>90 BPM with no&nbsp;downbeat accent</dd>
+        </dl>
+        <p class="help-note">Time sigs use a dash in the URL (<code>3-4</code>,&nbsp;not&nbsp;<code>3/4</code>). Everything after the tempo is optional. <code>#</code> works too if your browser strips paths.</p>
+      </div>
+
+      <div class="group">
+        <div class="group-label">About</div>
+        <p class="help-about">t0ck is part of <a href="https://0utput.co" target="_blank" rel="noopener">0fam</a>&nbsp;— a family of small, focused web apps from&nbsp;0utput. No accounts, no ads, no&nbsp;tracking.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- iOS first-load notice (rendered-file engine limitation) ---------- -->
+<!-- Shown on iOS before first play. Informs user of the 10-min session cap
+     and sets expectations for the native app. One-tap dismiss; not persisted
+     (each session gets the reminder until the native app ships). -->
+<div class="notice" id="iosNotice" role="dialog" aria-modal="true" aria-labelledby="iosNoticeTitle" aria-hidden="true">
+  <div class="notice-card">
+    <div class="notice-icon">heads up</div>
+    <h2 class="notice-title" id="iosNoticeTitle">iOS browser limit</h2>
+    <div class="notice-body">
+      <p>On iOS, the metronome runs in 10-minute sessions. Tap Continue when it finishes to keep going.</p>
+      <p class="small">Everything else works normally &mdash; tempo, time signatures, subdivisions, sounds, shortcuts.</p>
+    </div>
+    <div class="notice-actions">
+      <button class="notice-btn primary" id="iosNoticeDismiss">I understand</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- session-end notice (iOS only) ---------- -->
+<!-- Shown when the rendered file reaches its natural end. Offers a one-tap
+     restart without ceremony. If user picks Stop, the metronome just stops
+     and returns to the idle state — Start is available again. -->
+<div class="notice" id="sessionEndNotice" role="dialog" aria-modal="true" aria-labelledby="sessionEndTitle" aria-hidden="true">
+  <div class="notice-card">
+    <div class="notice-icon">session complete</div>
+    <h2 class="notice-title" id="sessionEndTitle">Keep going?</h2>
+    <div class="notice-body">
+      <p>You've reached the 10-minute session limit. Tap Continue to keep going.</p>
+    </div>
+    <div class="notice-actions">
+      <button class="notice-btn" id="sessionEndStop">Stop</button>
+      <button class="notice-btn primary" id="sessionEndContinue">Continue</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// t0ck changelog
+// v01 (2026-04-22) — initial (as temp0): lookahead Web Audio scheduler, tap tempo (last 4 taps), time sigs (4/4 3/4 6/8 2/4 5/4), subdivisions (off/8/16/3), URL hash + localStorage state, keyboard shortcuts, dark-mode aware
+// v02 (2026-04-22) — fix: wrap history.replaceState and location.hash reads in try/catch so sandboxed previews (null-origin iframe) degrade silently instead of throwing SecurityError on load
+// v03 (2026-04-22) — add: selectable click sound (sine/wood/tick/beep) in settings, with preview on change; noise buffer cached for tick sound
+// v04 (2026-04-22) — rename temp0 → metr0n0me (Tempo iOS app collision); add OG/Twitter meta suite + inline-SVG dotted-zero favicon; replace bottom-drawer settings with full-screen slide-up modal using segmented controls; live-apply (no save/cancel); ESC key closes modal
+// v05 (2026-04-22) — fix: BPM no longer persists to localStorage (stale tempos from prior sessions were loading as defaults). sig/sub/sound still persist as user preferences. URL hash behavior unchanged — shareable links with #bpm=90 still work. Fresh loads without a hash always start at 120.
+// v06 (2026-04-22) — pretty URLs: #90 loads BPM 90, #90/3-4 adds time sig, #90/3-4/8 adds subdivision, #90/3-4/8/wood adds sound. Omits defaults for short bookmarkable links. Also reads location.pathname so /90 works with 404.html redirect (GH Pages) or _redirects (Cloudflare). Legacy #bpm=90&sig=3/4 still parses for backward compat.
+// v07 (2026-04-22) — rename metr0n0me → t0ck (onomatopoeic, matches 0fam short-name pattern, hosted at t0ck.app). localStorage key updated to t0ck-state; migrates prior metr0n0me-state and temp0-state values so prefs carry over for anyone who touched earlier versions.
+// v08 (2026-04-22) — theme toggle in header (☾/☀). Initial state follows OS prefers-color-scheme; button flips for current session only, no persistence. If OS pref changes mid-session AND user hasn't toggled, we follow. Refactored dark-mode CSS to use [data-theme] selectors alongside @media query so both system and manual paths share one palette definition.
+// v09 (2026-04-22) — S opens settings (symmetric with Escape closing). Branded focus rings using accent color on all interactive elements — replaces browser-default orange/blue ring. Uses :focus-visible so mouse clicks don't show rings, only keyboard tabs do.
+// v10 (2026-04-22) — add Help modal with keyboard shortcuts, URL pattern docs, and about blurb. Footer now has Settings and Help side by side. "?" key opens Help (mirrors "S" for Settings). Removed permanent hint line under play button — shortcuts now live in Help. Reusable modal component (both Settings and Help share .modal styles and open/close logic).
+// v11 (2026-04-22) — restore hint line under play button (reverting part of v10). Muscle-memory shortcuts (space, arrows, T) are the ones users repeat hundreds of times per session, and on-screen visibility turns first-time users into keyboard-fluent users. Trimmed to only the 3 playback shortcuts — S and ? are labeled on their footer buttons, so no need to repeat. Full keymap + URL docs + About stay in Help modal.
+// v12 (2026-04-22) — add accent toggle. Default is on (first beat louder/higher). When off ("flat" mode) every beat uses the main-beat sound, and the first beat dot loses its mint highlight — visual and audio stay in sync. Pretty URL extends with /flat suffix only when non-default. Useful for grooves that don't land on 1, polyrhythms, or just practicing pulse without a downbeat cue.
+// v13 (2026-04-22) — typography polish: text-wrap: pretty on all prose (Help modal lead/note/about, Settings footer note) to prevent widows/orphans. Falls back to normal wrap in older browsers. Also non-breaking spaces on "4/4", "3/4" etc. in help text so time-signature fractions never break across a line.
+// v14 (2026-04-22) — copy cleanup in About: removed invented marketing aphorism ("your tempo is not a preference; it's a moment"). Kept the factual lines — what it is, who makes it, the no-tracking claim.
+// v15 (2026-04-22) — [ABANDONED] attempted glyph-forward settings with hand-drawn SVG music notation and waveforms. The SVGs read as amateurish at small size and the stacked Space Mono numerals didn't feel any more musical than plain text. Rolled back.
+// v16 (2026-04-22) — proper glyph-forward settings. Time signatures and subdivisions now use Bravura Text (Steinberg's SMuFL music font, loaded from jsDelivr CDN, OFL licensed). Sound buttons use Lucide icons (waves, zap, activity, bell) for subtle envelope differentiation. First-beat buttons use Lucide volume-2 / volume-1 for emphasized-vs-uniform. Segment buttons filled flex:1 in each row, taller to accommodate the larger glyphs. Font-display: swap so text shows instantly even if Bravura hasn't loaded.
+// v17 (2026-04-22) — fix time signature rendering. Bravura's classical serif time-sig digits clashed with the app's modern Inter/Space Mono aesthetic AND rendered too small relative to button size. Replaced with styled Space Mono numerals at 32px with tight 0.82 leading — digits feel like a unified time-signature unit rather than two separate numbers. Subdivisions keep Bravura (single music notes read correctly). Triplet "3" marker repositioned as a proper superscript above the 8th-note glyph with a short bracket line underneath.
+// v18 (2026-04-22) — strip all glyphs from settings buttons. Bravura font dropped (no longer needed), Lucide SVGs removed from Sound and First Beat rows, stacked time signature digits unified into a single inline text. All 15 segment buttons now use plain Space Mono text labels. flex:1 row-filling preserved so each row equally spans the modal width. Waiting on a proper icon/button treatment spec before reintroducing glyphs.
+// v19 (2026-04-22) — mobile viewport fix. Changed html/body min-height from 100vh to 100dvh (dynamic viewport height). Fixes iOS Safari (Settings/Help footer pushed behind bottom toolbar) and iOS Chrome (footer completely off-screen). 100vh on iOS calculates against the toolbar-collapsed viewport, so any content that fills the viewport gets cut off when the toolbar is visible. 100dvh adapts to the actual available space. Fallback to 100vh for older browsers that don't support dvh (pre-2022 Safari / pre-Chrome 108).
+// v20 (2026-04-22) — modal close animation symmetry. Previously modal slid up on open but snapped away instantly on close because visibility: hidden flipped immediately while transform was still animating. Now visibility transition is delayed on close (waits for slide-down to finish) but immediate on open. The open and close now mirror each other — both are a 260ms slide using the same easing curve. Felt jarring before; feels intentional now.
+// v21 (2026-04-22) — modal content vertical centering on large screens. Previously main screen had its content vertically centered but Settings/Help stacked content from the top, causing visual "jump" when opening a modal on a tall viewport. Now .modal-body uses margin: auto 0 so the body floats in the middle space between the pinned header and the pinned footer. Self-correcting: on shorter viewports where content exceeds available space, auto margins collapse to zero and the layout reverts to natural top-down stacking. Also added a min-height guard so body content on very short viewports never overflows the header.
+// v22 (2026-04-22) — optical centering correction. True geometric center reads as slightly bottom-heavy on tall viewports because eyes perceive "balanced" as weighted slightly above mid. Added a 32px fixed bottom margin to .modal-body so flexbox distributes more space above than below, nudging content up to where it feels centered. Only applies when the viewport is tall enough that auto margins are distributing real space; on short viewports the fixed margin is absorbed by the overflow handling.
+// v23 (2026-04-22) — bump optical correction from 48px to 64px padding-bottom (24px visual shift → 32px). The 24px nudge was real but subtle; 32px lands more confidently at the top end of the optical-centering range.
+// v24 (2026-04-22) — bump optical correction again, 64px → 96px (32px shift → 48px). Past the standard optical-centering range but the modal body is small relative to a tall desktop viewport, and small blocks need stronger biases to feel centered. Previous 32px still read as bottom-heavy.
+// v25-v30 (2026-04-23) — [DEAD END] tried to fix iOS Safari silent-mode audio via Web Audio session promotion tricks. Root cause: iOS 26+ Safari refuses to play Web Audio through the built-in speaker regardless of approach (AirPods bypass this, which is why testing with headphones worked). Reverted v24 as baseline. v31 shipped an HTML5-only fallback as an emergency rough — deliberately not kept as live since it regressed desktop audio quality.
+// v32 (2026-04-23) — hybrid audio engine. Two backends behind a common interface: WebAudioEngine (v24's procedural oscillator synthesis, used on desktop and Android) and HtmlAudioEngine (pre-rendered click samples via HTMLAudioElement pool, used when Web Audio is silently muted — i.e. iOS speakers). Backend selection: create an AudioContext on first Start tap, play a silent test buffer, inspect the AudioContext state and AudioBufferSourceNode 'ended' event timing. If the context fails to advance normally, fall back to HTML5. All four sound variants (sine/wood/tick/beep) and accent nuance preserved in both backends — the HTML5 backend uses 8 pre-generated samples (4 sounds × 2 accent variants) baked in as ~12KB of base64 data URIs. Added jitter indicator: small colored dot near the version tag shows scheduling quality in real time (green < 10ms, yellow < 25ms, red > 25ms). Scheduler auto-stops with a message when sustained jitter exceeds 80ms for 5+ consecutive ticks, so a degraded metronome is never silently trusted.
+// v33 (2026-04-23) — fix jitter measurement bug in v32. v32 measured "jitter" at schedule time instead of play time, so it was really measuring the scheduler's look-ahead window (0-100ms by design) rather than actual playback jitter. Result: the dot immediately went red and the auto-stop triggered for everyone, even when audio was working fine. Now jitter is measured inside the setTimeout callback at the moment the click actually plays, and only for the HTML5 backend (Web Audio has no JS-observable jitter because it schedules sample-accurately). Also relaxed the auto-stop threshold from 80ms to 150ms for 10+ consecutive ticks — v32's settings were too aggressive for real-world conditions.
+// v34 (2026-04-23) — force HTML5 backend on iOS. v32's hybrid detection logic never actually triggered the HTML5 fallback on iOS because it tested "does AudioContext.currentTime advance" as a proxy for "is sound coming out." On iOS, the context advances fine — iOS just silently mutes the speaker output for Web Audio. So the detection always passed and the HTML5 engine never loaded. The honest fix is UA sniffing: if WebKit on iOS, use HTML5; otherwise use Web Audio. Not elegant, but it maps to the real distinction — iOS WebKit is the one platform where Web Audio speaker output doesn't work. This is the cost of the platform, not a detection failure on our end.
+// v35 (2026-04-24) — replace HTML5 engine with rendered-file engine for iOS. v34's HTML5 backend used setTimeout scheduling + short sample playback, which produced audible jitter and swing at fast tempos and couldn't cleanly loop (gap at boundary). v35 renders a single continuous 10-minute MP3 for the user's current config (sound + time sig + subdivision + accent + base tempo) via OfflineAudioContext + lamejs, plays it through one HTMLAudioElement, and uses playbackRate for tempo. No scheduler, no jitter. Two base renders: 160 BPM (covers 40-160 at 0.25x-1.0x) and 320 BPM (covers 80-320). BPM changes inside a base's window are instant (playbackRate); changes crossing the boundary re-render and swap at the next measure boundary. Non-BPM changes (sound/sig/sub/accent) trigger a render-on-demand with measure-boundary swap. Pre-render pipeline at load: Phase 1 (blocking, ~4s) renders current config; Phase 2 (background) renders 3 other sounds at current base; Phase 3 (background) renders all 4 sounds at other base. Total cache: 8 configs, ~72 MB. Settings UI shows per-sound status (ready/rendering/queued) on iOS. Tap on pending sound queue-jumps it. 10-min session ends with "Continue / Stop" modal. First iOS load shows an "iOS browser limit" notice explaining the session cap. Jitter indicator and auto-stop removed — rendered files don't jitter. Web Audio path (desktop, Android) is completely unchanged from v24/v34.
+// v36 (2026-04-24) — copy cleanup on iOS modals. v35's notice text included "Our native iOS app is coming soon — it won't have this limit." Dropped because (a) the metronome App Store category is saturated and entering that market isn't the plan, and (b) "coming soon" is a promise on future time that costs nothing to make and everything to break; better to say nothing than pre-commit. Also dropped "That's a browser constraint, not a t0ck one" style framing from session-end modal — reads as blame-shifting even when factually correct. New copy states the 10-minute limit plainly, tells users what to do when it's hit, and stops. No apology, no promise, no defensiveness.
+(function () {
+  'use strict';
+
+  // ---------- state ----------
+  const state = {
+    bpm: 120,
+    sig: '4/4',
+    sub: 'off',
+    sound: 'sine',
+    accent: 'on'
+  };
+
+  const SUB_MAP = { off: 1, '8': 2, '16': 4, '3': 3 };
+  const SIG_BEATS = { '4/4': 4, '3/4': 3, '6/8': 6, '2/4': 2, '5/4': 5 };
+  const ACCENT_VALUES = { on: 1, off: 1 };
+  const STORAGE_KEY = 't0ck-state';
+
+  // ---------- elements ----------
+  const el = {
+    bpm: document.getElementById('bpm'),
+    minus: document.getElementById('minus'),
+    plus: document.getElementById('plus'),
+    tap: document.getElementById('tap'),
+    play: document.getElementById('play'),
+    beats: document.getElementById('beats'),
+    openSettings: document.getElementById('openSettings'),
+    closeSettings: document.getElementById('closeSettings'),
+    modal: document.getElementById('modal'),
+    openHelp: document.getElementById('openHelp'),
+    closeHelp: document.getElementById('closeHelp'),
+    helpModal: document.getElementById('helpModal'),
+    themeToggle: document.getElementById('themeToggle')
+  };
+
+  // ---------- persistence ----------
+  // URL carries full state (bpm/sig/sub/sound) for shareable/bookmarkable links.
+  // localStorage carries only preferences (sig/sub/sound) — BPM is deliberately
+  // excluded because tempo is per-practice-context, not a user preference.
+  //
+  // URL formats supported:
+  //   Pretty (canonical): #90 · #90/3-4 · #90/3-4/8 · #90/3-4/8/wood
+  //     Defaults are omitted so "#120" is a valid tempo-only link.
+  //     "-" substitutes "/" inside the time-signature token to keep the path
+  //     delimiter unambiguous.
+  //   Pretty path: /90, /90/3-4, etc. — works when hosting serves the HTML for
+  //     unknown paths (GitHub Pages: copy index.html → 404.html; Cloudflare
+  //     Pages: add a _redirects file with "/* /index.html 200").
+  //   Legacy: #bpm=90&sig=3/4&sub=off&snd=wood (kept for backward compat).
+  const DEFAULTS = { sig: '4/4', sub: 'off', sound: 'sine', accent: 'on' };
+
+  function encodeHash() {
+    const parts = [String(state.bpm)];
+    const nondefaultSig    = state.sig    !== DEFAULTS.sig;
+    const nondefaultSub    = state.sub    !== DEFAULTS.sub;
+    const nondefaultSound  = state.sound  !== DEFAULTS.sound;
+    const nondefaultAccent = state.accent !== DEFAULTS.accent;
+    // Position-based encoding: earlier tokens are placeholders when later
+    // tokens are non-default. Accent is serialized as "flat" (the word is
+    // the signal — we only write it when it's off).
+    const anyNonDefault = nondefaultSig || nondefaultSub || nondefaultSound || nondefaultAccent;
+    if (anyNonDefault) parts.push(state.sig.replace('/', '-'));
+    if (nondefaultSub || nondefaultSound || nondefaultAccent) parts.push(state.sub);
+    if (nondefaultSound || nondefaultAccent) parts.push(state.sound);
+    if (nondefaultAccent) parts.push('flat');
+    return '#' + parts.join('/');
+  }
+
+  function encodePrefs() {
+    return `sig=${encodeURIComponent(state.sig)}&sub=${state.sub}&snd=${state.sound}&acc=${state.accent}`;
+  }
+
+  function persist() {
+    try { history.replaceState(null, '', encodeHash()); } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEY, encodePrefs()); } catch (e) {}
+  }
+
+  function applyPrettyTokens(tokens) {
+    if (!tokens.length) return;
+    const b = parseInt(tokens[0], 10);
+    if (!isNaN(b)) state.bpm = clampBpm(b);
+    if (tokens[1]) {
+      const sig = tokens[1].replace('-', '/');
+      if (SIG_BEATS[sig] != null) state.sig = sig;
+    }
+    if (tokens[2] && SUB_MAP[tokens[2]] != null) state.sub = tokens[2];
+    if (tokens[3] && SOUNDS[tokens[3]]) state.sound = tokens[3];
+    // Accent token can appear at any position after BPM — check all remaining
+    // tokens for "flat". This keeps links like #90/flat valid even without
+    // explicit sig/sub/sound placeholders.
+    for (let i = 1; i < tokens.length; i++) {
+      if (tokens[i] === 'flat') { state.accent = 'off'; break; }
+    }
+  }
+
+  function applyKeyValueString(raw, allowBpm) {
+    let params;
+    try { params = new URLSearchParams(raw); } catch (e) { return; }
+    if (allowBpm) {
+      const b = parseInt(params.get('bpm'), 10);
+      if (!isNaN(b)) state.bpm = clampBpm(b);
+    }
+    const sig = params.get('sig');
+    if (sig && SIG_BEATS[sig] != null) state.sig = sig;
+    const sub = params.get('sub');
+    if (sub && SUB_MAP[sub] != null) state.sub = sub;
+    const snd = params.get('snd');
+    if (snd && SOUNDS[snd]) state.sound = snd;
+    const acc = params.get('acc');
+    if (acc && ACCENT_VALUES[acc]) state.accent = acc;
+  }
+
+  function loadState() {
+    // 1. Pretty pathname — e.g. /90 or /90/3-4. First segment must be a clean
+    //    integer, otherwise assume the app is mounted at a subpath and skip.
+    let pathRaw = '';
+    try { pathRaw = location.pathname.replace(/^\/+|\/+$/g, ''); } catch (e) {}
+    if (pathRaw) {
+      const first = pathRaw.split('/')[0];
+      const n = parseInt(first, 10);
+      if (!isNaN(n) && String(n) === first) {
+        applyPrettyTokens(pathRaw.split('/').filter(Boolean));
+        // Normalize URL so subsequent updates live on a clean root + hash.
+        try { history.replaceState(null, '', '/' + encodeHash()); } catch (e) {}
+        return;
+      }
+    }
+
+    // 2. Hash — pretty form if no "=", legacy key=value form otherwise.
+    let hashRaw = '';
+    try { hashRaw = location.hash.replace(/^#/, ''); } catch (e) {}
+    if (hashRaw) {
+      if (hashRaw.indexOf('=') !== -1) {
+        applyKeyValueString(hashRaw, true);
+      } else {
+        applyPrettyTokens(hashRaw.split('/').filter(Boolean));
+      }
+      return;
+    }
+
+    // 3. No URL state — load sig/sub/sound prefs from localStorage. BPM stays
+    //    at its default (120).
+    let prefs = '';
+    try { prefs = localStorage.getItem(STORAGE_KEY) || ''; } catch (e) {}
+    // Migration chain: check prior names so prefs carry across renames.
+    if (!prefs) {
+      try { prefs = localStorage.getItem('metr0n0me-state') || ''; } catch (e) {}
+    }
+    if (!prefs) {
+      try { prefs = localStorage.getItem('temp0-state') || ''; } catch (e) {}
+    }
+    if (prefs) applyKeyValueString(prefs, false);
+  }
+
+  // ---------- BPM helpers ----------
+  // v35 lifted floor to 40 and ceiling to 320 to match the rendered-file
+  // engine's usable range. The old 30-300 range had outliers that didn't
+  // map cleanly to the two-base architecture (30-39 would need a 3rd base
+  // for marginal benefit; 300-320 was always unreachable by v24's clamp).
+  function clampBpm(n) { return Math.max(40, Math.min(320, n | 0)); }
+
+  function setBpm(n) {
+    state.bpm = clampBpm(n);
+    el.bpm.value = state.bpm;
+    persist();
+    if (audioEngine === RenderedFileEngine && isPlaying) {
+      audioEngine.onBpmChange(snapshotState());
+    }
+  }
+
+  // ---------- (removed in v35) SAMPLE_SRCS base64 bank ----------
+  // v32-v34 shipped 8 pre-generated click samples inline (~12 KB) for the
+  // HTML5 fallback. v35 renders full-length MP3s on device via OfflineAudioContext
+  // + lamejs, so the static bank is gone. See RenderedFileEngine below.
+
+  // ---------- Web Audio noise buffer helper (used by 'tick' sound) ----------
+  let _noiseBuffer = null;
+  function getNoiseBuffer(ctx) {
+    if (!_noiseBuffer || _noiseBuffer.sampleRate !== ctx.sampleRate) {
+      const size = Math.floor(ctx.sampleRate * 0.05);
+      _noiseBuffer = ctx.createBuffer(1, size, ctx.sampleRate);
+      const data = _noiseBuffer.getChannelData(0);
+      for (let i = 0; i < size; i++) data[i] = Math.random() * 2 - 1;
+    }
+    return _noiseBuffer;
+  }
+
+  // ---------- Web Audio backend ----------
+  // Sample-accurate scheduling, procedural synthesis. Used when the platform
+  // honors Web Audio output (desktop, Android, iOS with AirPods).
+  const WebAudioEngine = (function() {
+    let ctx = null;
+    const SOUNDS = {
+      sine: function (time, accent) {
+        const p = {
+          down: { freq: 1600, gain: 0.55 }, main: { freq: 800, gain: 0.40 }, sub: { freq: 800, gain: 0.16 }
+        }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.002);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+        osc.start(time); osc.stop(time + 0.05);
+      },
+      wood: function (time, accent) {
+        const p = {
+          down: { freq: 2000, target: 1000, gain: 0.50 }, main: { freq: 1200, target: 600, gain: 0.38 }, sub: { freq: 1200, target: 600, gain: 0.14 }
+        }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'triangle'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.frequency.exponentialRampToValueAtTime(p.target, time + 0.012);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.001);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + 0.025);
+        osc.start(time); osc.stop(time + 0.035);
+      },
+      tick: function (time, accent) {
+        const p = {
+          down: { freq: 5000, gain: 0.30, dur: 0.020 }, main: { freq: 3500, gain: 0.24, dur: 0.018 }, sub: { freq: 3500, gain: 0.09, dur: 0.012 }
+        }[accent];
+        const src = ctx.createBufferSource(); src.buffer = getNoiseBuffer(ctx);
+        const filter = ctx.createBiquadFilter(); filter.type = 'bandpass';
+        filter.frequency.value = p.freq; filter.Q.value = 3;
+        const env = ctx.createGain();
+        src.connect(filter); filter.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.001);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + p.dur);
+        src.start(time); src.stop(time + p.dur + 0.01);
+      },
+      beep: function (time, accent) {
+        const p = {
+          down: { freq: 1200, gain: 0.40, dur: 0.08 }, main: { freq: 880, gain: 0.30, dur: 0.08 }, sub: { freq: 880, gain: 0.11, dur: 0.06 }
+        }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.003);
+        env.gain.setValueAtTime(p.gain, time + p.dur * 0.35);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + p.dur);
+        osc.start(time); osc.stop(time + p.dur + 0.01);
+      }
+    };
+    return {
+      name: 'web-audio',
+      init: function () {
+        if (!ctx) {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          ctx = new AC();
+        }
+        if (ctx.state === 'suspended') ctx.resume();
+      },
+      now: function () { return ctx ? ctx.currentTime * 1000 : performance.now(); },
+      play: function (soundName, accent, timeMs) {
+        const fn = SOUNDS[soundName] || SOUNDS.sine;
+        // Web Audio schedules in context seconds; convert from ms-since-now
+        const nowMs = performance.now();
+        const offsetS = Math.max(0, (timeMs - nowMs) / 1000);
+        fn(ctx.currentTime + offsetS, accent);
+      },
+      ctx: function () { return ctx; }
+    };
+  })();
+
+  // ---------- rendered-file audio backend (iOS) ----------
+  // v35: Pre-renders a 10-minute MP3 for the current config (sound + sig +
+  // sub + accent + base tempo), plays through one HTMLAudioElement, uses
+  // playbackRate for tempo control within each base's window.
+  //
+  // Two bases cover 40-320 BPM:
+  //   160 base: playbackRate 0.25-1.00 → covers 40-160 BPM
+  //   320 base: playbackRate 0.25-1.00 → covers 80-320 BPM
+  //
+  // Pre-render phases on init:
+  //   Phase 1 (blocking): current config at current base → ~4-5s on iPhone
+  //   Phase 2 (background): other 3 sounds at current base
+  //   Phase 3 (background): all 4 sounds at other base
+  //
+  // Config changes (sound/sig/sub/accent): render if not cached, swap at
+  // next measure boundary. BPM changes inside a base's window: instant
+  // playbackRate adjust. BPM crossing base boundary: same as config change.
+  //
+  // Why this is different from v34's HTML5 engine: no setTimeout scheduling
+  // (so no jitter), no short-sample pooling (so no boundary stutter), one
+  // continuous file means playback tight at all tempos within the rate
+  // window. Cost: 10-min session cap per file, 4-5s first-render at boot.
+  const RenderedFileEngine = (function () {
+    const SR = 44100;
+    const DURATION_SEC = 600;      // 10-minute files
+    const CLICK_PAD_MS = 80;       // template buffer length — covers longest envelope (beep 80ms)
+    const BASES = [160, 320];
+    const SOUND_NAMES = ['sine', 'wood', 'tick', 'beep'];
+
+    // Sound recipes — mirror of WebAudioEngine's SOUNDS, but parameterized
+    // on ctx so they can render into an OfflineAudioContext. Kept identical
+    // to v24 recipes; the only difference is ctx is injected, not captured.
+    const SOUND_RECIPES = {
+      sine: function (ctx, time, accent) {
+        const p = { down: { freq: 1600, gain: 0.55 }, main: { freq: 800, gain: 0.40 }, sub: { freq: 800, gain: 0.16 } }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.002);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+        osc.start(time); osc.stop(time + 0.05);
+      },
+      wood: function (ctx, time, accent) {
+        const p = { down: { freq: 2000, target: 1000, gain: 0.50 }, main: { freq: 1200, target: 600, gain: 0.38 }, sub: { freq: 1200, target: 600, gain: 0.14 } }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'triangle'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.frequency.exponentialRampToValueAtTime(p.target, time + 0.012);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.001);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + 0.025);
+        osc.start(time); osc.stop(time + 0.035);
+      },
+      tick: function (ctx, time, accent) {
+        const p = { down: { freq: 5000, gain: 0.30, dur: 0.020 }, main: { freq: 3500, gain: 0.24, dur: 0.018 }, sub: { freq: 3500, gain: 0.09, dur: 0.012 } }[accent];
+        const nbuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.05), ctx.sampleRate);
+        const ndata = nbuf.getChannelData(0);
+        for (let i = 0; i < ndata.length; i++) ndata[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource(); src.buffer = nbuf;
+        const filter = ctx.createBiquadFilter(); filter.type = 'bandpass';
+        filter.frequency.value = p.freq; filter.Q.value = 3;
+        const env = ctx.createGain();
+        src.connect(filter); filter.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.001);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + p.dur);
+        src.start(time); src.stop(time + p.dur + 0.01);
+      },
+      beep: function (ctx, time, accent) {
+        const p = { down: { freq: 1200, gain: 0.40, dur: 0.08 }, main: { freq: 880, gain: 0.30, dur: 0.08 }, sub: { freq: 880, gain: 0.11, dur: 0.06 } }[accent];
+        const osc = ctx.createOscillator(); const env = ctx.createGain();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(p.freq, time);
+        osc.connect(env); env.connect(ctx.destination);
+        env.gain.setValueAtTime(0.0001, time);
+        env.gain.linearRampToValueAtTime(p.gain, time + 0.003);
+        env.gain.setValueAtTime(p.gain, time + p.dur * 0.35);
+        env.gain.exponentialRampToValueAtTime(0.0001, time + p.dur);
+        osc.start(time); osc.stop(time + p.dur + 0.01);
+      }
+    };
+
+    // Click template cache: Map<'sound|accent', Float32Array>
+    const clickTemplates = new Map();
+    let templatesReady = false;
+
+    // Full-file cache: Map<configKey, { blob, url, base }>
+    const fileCache = new Map();
+
+    // Render queue (FIFO with queue-jump support)
+    const renderQueue = [];
+    let currentJob = null;
+    const statusListeners = [];
+    let sessionEndedCb = null;
+
+    // Playback state
+    let audioEl = null;
+    let currentConfigKey = null;
+    let currentBase = null;
+    let playing = false;
+    let bootProgress = 0;
+    let pendingSwap = null;
+
+    function configKey(sound, sig, sub, accent, base) {
+      return sound + '|' + sig + '|' + sub + '|' + accent + '|' + base;
+    }
+    function baseForBpm(bpm) { return bpm <= 160 ? 160 : 320; }
+    function yieldToUI() { return new Promise(function (r) { setTimeout(r, 0); }); }
+    function notifyStatus() {
+      for (var i = 0; i < statusListeners.length; i++) {
+        try { statusListeners[i](); } catch (e) {}
+      }
+    }
+
+    // Render all 12 click templates (4 sounds × 3 accents) via short
+    // OfflineAudioContext renders. ~100ms each, cheap. Cached for life.
+    async function buildClickTemplates() {
+      if (templatesReady) return;
+      const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      const padSamples = Math.ceil(SR * (CLICK_PAD_MS / 1000));
+      for (let si = 0; si < SOUND_NAMES.length; si++) {
+        const sound = SOUND_NAMES[si];
+        const accents = ['down', 'main', 'sub'];
+        for (let ai = 0; ai < accents.length; ai++) {
+          const accent = accents[ai];
+          const ctx = new OAC(1, padSamples, SR);
+          SOUND_RECIPES[sound](ctx, 0, accent);
+          const buf = await ctx.startRendering();
+          clickTemplates.set(sound + '|' + accent, new Float32Array(buf.getChannelData(0)));
+          await yieldToUI();
+        }
+      }
+      templatesReady = true;
+    }
+
+    // Render a full 10-minute file for one config. Pastes click templates
+    // into a Float32Array at each beat/sub-beat position, clamps, encodes.
+    async function renderFile(config) {
+      await buildClickTemplates();
+      const sound = config.sound;
+      const stepsPerBeatVal = SUB_MAP[config.sub];
+      const sigBeats = SIG_BEATS[config.sig];
+      const stepsPerMeasure = sigBeats * stepsPerBeatVal;
+      const stepSec = (60 / config.base) / stepsPerBeatVal;
+      const totalSteps = Math.floor(DURATION_SEC / stepSec);
+      const totalSamples = SR * DURATION_SEC;
+      const samples = new Float32Array(totalSamples);
+
+      const tmplDown = clickTemplates.get(sound + '|down');
+      const tmplMain = clickTemplates.get(sound + '|main');
+      const tmplSub  = clickTemplates.get(sound + '|sub');
+
+      for (let i = 0; i < totalSteps; i++) {
+        const step = i % stepsPerMeasure;
+        const isMainBeat = step % stepsPerBeatVal === 0;
+        const isDownbeat = step === 0;
+        const tmpl = (isDownbeat && config.accent === 'on') ? tmplDown : (isMainBeat ? tmplMain : tmplSub);
+        const startSample = Math.floor(i * stepSec * SR);
+        const maxJ = Math.min(tmpl.length, totalSamples - startSample);
+        for (let j = 0; j < maxJ; j++) {
+          samples[startSample + j] += tmpl[j];
+        }
+        if (i > 0 && i % 500 === 0) await yieldToUI();
+      }
+
+      // Clamp (overlapping templates at high subdivisions can exceed ±1)
+      for (let i = 0; i < samples.length; i++) {
+        if (samples[i] > 1) samples[i] = 1;
+        else if (samples[i] < -1) samples[i] = -1;
+      }
+      return await encodeMP3(samples);
+    }
+
+    async function encodeMP3(channelData) {
+      if (typeof lamejs === 'undefined') {
+        throw new Error('lamejs not loaded — check network');
+      }
+      const int16 = new Int16Array(channelData.length);
+      for (let i = 0; i < channelData.length; i++) {
+        const s = channelData[i];
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      const enc = new lamejs.Mp3Encoder(1, SR, 128);
+      const chunks = [];
+      const blockSize = 1152;
+      for (let i = 0; i < int16.length; i += blockSize) {
+        const part = int16.subarray(i, i + blockSize);
+        const out = enc.encodeBuffer(part);
+        if (out.length > 0) chunks.push(out);
+        if ((i / blockSize) % 400 === 0) await yieldToUI();
+      }
+      const tail = enc.flush();
+      if (tail.length > 0) chunks.push(tail);
+      return new Blob(chunks, { type: 'audio/mp3' });
+    }
+
+    function findInQueue(key) {
+      for (let i = 0; i < renderQueue.length; i++) {
+        const c = renderQueue[i];
+        if (configKey(c.sound, c.sig, c.sub, c.accent, c.base) === key) return i;
+      }
+      return -1;
+    }
+
+    function enqueue(config, opts) {
+      opts = opts || {};
+      const key = configKey(config.sound, config.sig, config.sub, config.accent, config.base);
+      if (fileCache.has(key)) return Promise.resolve(fileCache.get(key));
+      if (currentJob && configKey(currentJob.sound, currentJob.sig, currentJob.sub, currentJob.accent, currentJob.base) === key) {
+        return waitForConfig(key);
+      }
+      const existing = findInQueue(key);
+      if (existing >= 0) {
+        if (opts.front && existing > 0) {
+          const item = renderQueue.splice(existing, 1)[0];
+          renderQueue.unshift(item);
+          notifyStatus();
+        }
+      } else {
+        if (opts.front) renderQueue.unshift(config);
+        else renderQueue.push(config);
+        notifyStatus();
+      }
+      processQueue();
+      return waitForConfig(key);
+    }
+
+    function waitForConfig(key) {
+      return new Promise(function (resolve) {
+        if (fileCache.has(key)) { resolve(fileCache.get(key)); return; }
+        const checker = function () {
+          if (fileCache.has(key)) {
+            const idx = statusListeners.indexOf(checker);
+            if (idx >= 0) statusListeners.splice(idx, 1);
+            resolve(fileCache.get(key));
+          }
+        };
+        statusListeners.push(checker);
+      });
+    }
+
+    async function processQueue() {
+      if (currentJob) return;
+      while (renderQueue.length > 0) {
+        currentJob = renderQueue.shift();
+        notifyStatus();
+        try {
+          const key = configKey(currentJob.sound, currentJob.sig, currentJob.sub, currentJob.accent, currentJob.base);
+          const blob = await renderFile(currentJob);
+          const url = URL.createObjectURL(blob);
+          fileCache.set(key, { blob: blob, url: url, base: currentJob.base });
+        } catch (e) {
+          console.error('render failed:', e);
+        }
+        currentJob = null;
+        notifyStatus();
+      }
+    }
+
+    async function bootPhases(initial) {
+      const p1Key = configKey(initial.sound, initial.sig, initial.sub, initial.accent, initial.base);
+      bootProgress = 5; notifyStatus();
+      await buildClickTemplates();
+      bootProgress = 30; notifyStatus();
+
+      const blob = await renderFile(initial);
+      const url = URL.createObjectURL(blob);
+      fileCache.set(p1Key, { blob: blob, url: url, base: initial.base });
+      bootProgress = 100; notifyStatus();
+
+      // Phase 2 — other sounds at current base
+      for (let i = 0; i < SOUND_NAMES.length; i++) {
+        const s = SOUND_NAMES[i];
+        if (s !== initial.sound) {
+          enqueue({ sound: s, sig: initial.sig, sub: initial.sub, accent: initial.accent, base: initial.base });
+        }
+      }
+      // Phase 3 — all sounds at other base
+      const otherBase = initial.base === 160 ? 320 : 160;
+      for (let i = 0; i < SOUND_NAMES.length; i++) {
+        enqueue({ sound: SOUND_NAMES[i], sig: initial.sig, sub: initial.sub, accent: initial.accent, base: otherBase });
+      }
+    }
+
+    function ensureAudioEl() {
+      if (!audioEl) {
+        audioEl = new Audio();
+        audioEl.setAttribute('playsinline', '');
+        try { audioEl.preservesPitch = false; } catch (e) {}
+        try { audioEl.mozPreservesPitch = false; } catch (e) {}
+        try { audioEl.webkitPreservesPitch = false; } catch (e) {}
+        audioEl.addEventListener('ended', function () {
+          playing = false;
+          if (sessionEndedCb) sessionEndedCb();
+        });
+      }
+      return audioEl;
+    }
+
+    function playLoaded(key, base, bpm) {
+      const entry = fileCache.get(key);
+      if (!entry) return false;
+      const a = ensureAudioEl();
+      a.src = entry.url;
+      a.currentTime = 0;
+      a.playbackRate = bpm / base;
+      currentConfigKey = key;
+      currentBase = base;
+      playing = true;
+      const p = a.play();
+      if (p && p.catch) p.catch(function (err) { console.error('play failed:', err); });
+      return true;
+    }
+
+    return {
+      name: 'rendered-file',
+      iosMode: true,
+      getBootProgress: function () { return bootProgress; },
+
+      init: function (snap) {
+        // Returns the phase-1 promise. Resolves when first file is playable.
+        const base = baseForBpm(snap.bpm);
+        return bootPhases({
+          sound: snap.sound, sig: snap.sig, sub: snap.sub,
+          accent: snap.accent, base: base
+        });
+      },
+
+      start: function (snap) {
+        const base = baseForBpm(snap.bpm);
+        const key = configKey(snap.sound, snap.sig, snap.sub, snap.accent, base);
+        if (fileCache.has(key)) {
+          playLoaded(key, base, snap.bpm);
+          return;
+        }
+        // Queue-jump and wait
+        enqueue({ sound: snap.sound, sig: snap.sig, sub: snap.sub, accent: snap.accent, base: base }, { front: true })
+          .then(function () { playLoaded(key, base, snap.bpm); });
+      },
+
+      stop: function () {
+        if (audioEl) {
+          try { audioEl.pause(); audioEl.currentTime = 0; } catch (e) {}
+        }
+        playing = false;
+        pendingSwap = null;
+      },
+
+      onBpmChange: function (snap) {
+        if (!playing || !audioEl) return;
+        const newBase = baseForBpm(snap.bpm);
+        if (newBase === currentBase) {
+          audioEl.playbackRate = snap.bpm / currentBase;
+        } else {
+          this.onConfigChange(snap);
+        }
+      },
+
+      onConfigChange: function (snap) {
+        if (!playing || !audioEl) return;
+        const newBase = baseForBpm(snap.bpm);
+        const newKey = configKey(snap.sound, snap.sig, snap.sub, snap.accent, newBase);
+        if (newKey === currentConfigKey) return;
+        pendingSwap = { key: newKey, base: newBase, bpm: snap.bpm, sigBeats: SIG_BEATS[snap.sig] };
+        if (!fileCache.has(newKey)) {
+          enqueue({ sound: snap.sound, sig: snap.sig, sub: snap.sub, accent: snap.accent, base: newBase }, { front: true });
+        }
+      },
+
+      // Called each animation frame from drawLoop. Performs pending swap
+      // at measure boundary if ready. Returns { beat } for visual pulse
+      // (or null if not playing).
+      tick: function (snap) {
+        if (!playing || !audioEl) return null;
+        const ct = audioEl.currentTime;
+        const sigBeats = SIG_BEATS[snap.sig];
+        const totalBeats = ct * currentBase / 60;
+        const beatIdx = Math.floor(totalBeats) % sigBeats;
+
+        if (pendingSwap && fileCache.has(pendingSwap.key)) {
+          const measuresElapsed = totalBeats / sigBeats;
+          const frac = measuresElapsed - Math.floor(measuresElapsed);
+          // Swap in the first 4% of a new measure — i.e. just after beat 1 lands
+          if (frac < 0.04) {
+            const entry = fileCache.get(pendingSwap.key);
+            const a = audioEl;
+            const newBase = pendingSwap.base;
+            const newBpm = pendingSwap.bpm;
+            try { a.pause(); } catch (e) {}
+            a.src = entry.url;
+            a.currentTime = 0;
+            a.playbackRate = newBpm / newBase;
+            currentConfigKey = pendingSwap.key;
+            currentBase = newBase;
+            pendingSwap = null;
+            const pp = a.play();
+            if (pp && pp.catch) pp.catch(function (err) { console.error('swap play:', err); });
+            return { beat: 0 };
+          }
+        }
+        return { beat: beatIdx };
+      },
+
+      getSoundStatus: function (soundName, snap) {
+        const base = baseForBpm(snap.bpm);
+        const key = configKey(soundName, snap.sig, snap.sub, snap.accent, base);
+        if (fileCache.has(key)) return 'ready';
+        if (currentJob && configKey(currentJob.sound, currentJob.sig, currentJob.sub, currentJob.accent, currentJob.base) === key) {
+          return 'rendering';
+        }
+        if (findInQueue(key) >= 0) return 'queued';
+        return 'none';
+      },
+
+      // Subscribe to cache/queue status changes (settings UI).
+      onStatusChange: function (cb) { statusListeners.push(cb); },
+      onSessionEnd: function (cb) { sessionEndedCb = cb; },
+
+      continueSession: function (snap) {
+        if (audioEl && currentConfigKey) {
+          try { audioEl.currentTime = 0; } catch (e) {}
+          audioEl.playbackRate = snap.bpm / currentBase;
+          playing = true;
+          const pp = audioEl.play();
+          if (pp && pp.catch) pp.catch(function (err) { console.error('continue:', err); });
+        }
+      },
+
+      // Legacy play() shim — WebAudioEngine is called per-tick via
+      // audioEngine.play(sound, accent, timeMs). RenderedFileEngine doesn't
+      // use per-tick playback; this is a no-op so settings-preview calls
+      // (which fire play() on the active engine) don't crash. Preview on
+      // iOS is skipped anyway since the point of changing sound on iOS is
+      // to trigger a file re-render, not audition a single click.
+      play: function () {},
+      init_webaudio: function () {}  // compatibility no-op
+    };
+  })();
+
+  // ---------- backend selection ----------
+  // iOS WebKit (Safari and all iOS browsers, since they all share WebKit)
+  // silently mutes Web Audio output to the built-in speaker. AudioContext
+  // reports as "running" and currentTime advances normally — but no sound
+  // comes out. There's no JS-observable signal to distinguish "working"
+  // from "muted by iOS," so we can't detect the problem at runtime. The
+  // only reliable signal is "are we on iOS." UA sniffing is normally
+  // avoided in modern web dev, but here it maps to a real capability
+  // difference that no feature-detection API exposes.
+  //
+  // Desktop + Android: Web Audio, sample-accurate timing, 4 unique sounds.
+  // iOS Safari/Chrome/Firefox/etc (all WebKit): HTML5 audio, pre-rendered
+  // samples, setTimeout scheduling.
+  function isIOS() {
+    const ua = navigator.userAgent || '';
+    // iPhone/iPad/iPod on any iOS version. iPadOS reports as "Macintosh"
+    // but with touch points, so also check that.
+    if (/iPhone|iPad|iPod/.test(ua)) return true;
+    if (/Macintosh/.test(ua) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1) return true;
+    return false;
+  }
+
+  let audioEngine = isIOS() ? RenderedFileEngine : WebAudioEngine;
+
+  // Legacy SOUNDS shim — settings-change preview calls SOUNDS[state.sound].play()
+  // to audition a sound. Route this through the active backend.
+  const SOUNDS = {
+    sine:  { play: function(_ctx, _t, accent) { audioEngine.play('sine', accent, performance.now()); } },
+    wood:  { play: function(_ctx, _t, accent) { audioEngine.play('wood', accent, performance.now()); } },
+    tick:  { play: function(_ctx, _t, accent) { audioEngine.play('tick', accent, performance.now()); } },
+    beep:  { play: function(_ctx, _t, accent) { audioEngine.play('beep', accent, performance.now()); } }
+  };
+
+  // ---------- scheduler ----------
+  // Unified scheduler working in milliseconds (performance.now domain).
+  // Both backends accept play(sound, accent, timeMs). Jitter is measured
+  // as the gap between when a click was scheduled and when scheduleClick
+  // was actually invoked by the scheduler.
+  let isPlaying = false;
+  let nextTickTime = 0;
+  let currentStep = 0;
+  let schedulerTick = null;
+  const LOOKAHEAD_MS = 25;
+  const SCHEDULE_AHEAD_MS = 100;
+  const visualQueue = [];
+
+  // Jitter tracking removed in v35: the HTML5 fallback that needed it is
+  // gone, and the rendered-file engine has no JS-observable timing drift
+  // (playback is driven by HTMLAudioElement, not setTimeout).
+
+  function ensureCtx() {
+    // Web Audio engine needs init() called in a user-gesture handler so the
+    // AudioContext can start. RenderedFileEngine's first play is triggered
+    // from start(), which is called from a user click — same rule applies.
+    if (audioEngine.init && audioEngine !== RenderedFileEngine) {
+      audioEngine.init();
+    }
+  }
+
+  function stepsPerBeat() { return SUB_MAP[state.sub]; }
+  function stepsPerMeasure() { return SIG_BEATS[state.sig] * stepsPerBeat(); }
+  function msPerStep() { return (60000 / state.bpm) / stepsPerBeat(); }
+
+  function scheduleClick(step, timeMs) {
+    const spb = stepsPerBeat();
+    const isMainBeat = step % spb === 0;
+    const isDownbeat = step === 0;
+    const accentActive = state.accent === 'on';
+    const accent = (isDownbeat && accentActive) ? 'down' : isMainBeat ? 'main' : 'sub';
+    audioEngine.play(state.sound, accent, timeMs);
+    visualQueue.push({ step: step, time: timeMs, scheduledAt: timeMs });
+  }
+
+  function advance() {
+    nextTickTime += msPerStep();
+    currentStep = (currentStep + 1) % stepsPerMeasure();
+  }
+
+  function scheduler() {
+    while (nextTickTime < performance.now() + SCHEDULE_AHEAD_MS) {
+      scheduleClick(currentStep, nextTickTime);
+      advance();
+    }
+  }
+
+  // --- engine-dispatching start/stop ---
+  // RenderedFileEngine handles its own playback (one continuous MP3 via
+  // HTMLAudioElement + playbackRate). WebAudioEngine uses the scheduler
+  // with per-tick play(). Visual pulse path also differs: rendered engine
+  // computes current beat from audio.currentTime; web audio engine uses
+  // the visualQueue populated by the scheduler.
+  function start() {
+    if (audioEngine === RenderedFileEngine) {
+      isPlaying = true;
+      audioEngine.start(snapshotState());
+      el.play.textContent = 'Stop';
+      el.play.classList.add('playing');
+      requestAnimationFrame(drawLoop);
+      return;
+    }
+    ensureCtx();
+    isPlaying = true;
+    currentStep = 0;
+    nextTickTime = performance.now() + 60;
+    schedulerTick = setInterval(scheduler, LOOKAHEAD_MS);
+    el.play.textContent = 'Stop';
+    el.play.classList.add('playing');
+    requestAnimationFrame(drawLoop);
+  }
+
+  function stop() {
+    isPlaying = false;
+    if (audioEngine === RenderedFileEngine) {
+      audioEngine.stop();
+    } else {
+      if (schedulerTick) clearInterval(schedulerTick);
+      schedulerTick = null;
+      visualQueue.length = 0;
+    }
+    el.play.textContent = 'Start';
+    el.play.classList.remove('playing');
+    clearBeatDots();
+  }
+
+  function snapshotState() {
+    return { bpm: state.bpm, sig: state.sig, sub: state.sub, sound: state.sound, accent: state.accent };
+  }
+
+  function toggle() { isPlaying ? stop() : start(); }
+
+  // ---------- visual pulse ----------
+  function renderBeats() {
+    const beats = SIG_BEATS[state.sig];
+    const accentOn = state.accent === 'on';
+    el.beats.innerHTML = '';
+    for (let i = 0; i < beats; i++) {
+      const d = document.createElement('div');
+      d.className = 'beat-dot' + (i === 0 && accentOn ? ' downbeat' : '');
+      d.dataset.beat = i;
+      el.beats.appendChild(d);
+    }
+  }
+
+  function clearBeatDots() {
+    el.beats.querySelectorAll('.beat-dot').forEach(d => d.classList.remove('active'));
+  }
+
+  function flashBeat(beatIndex) {
+    const dots = el.beats.querySelectorAll('.beat-dot');
+    dots.forEach(d => d.classList.remove('active'));
+    const target = dots[beatIndex];
+    if (target) {
+      target.classList.add('active');
+      setTimeout(() => target.classList.remove('active'), 90);
+    }
+  }
+
+  // drawLoop — visual pulse for beat dots. Two paths:
+  //   - RenderedFileEngine: engine.tick() returns { beat } computed from
+  //     audio.currentTime × base / 60. This is also where measure-boundary
+  //     swaps are performed, so the animation frame also drives the swap.
+  //   - WebAudioEngine: reads scheduled ticks from visualQueue (populated
+  //     by scheduler at schedule-time, consumed by drawLoop at play-time).
+  let lastRenderedBeat = -1;
+  function drawLoop() {
+    if (!isPlaying) return;
+    if (audioEngine === RenderedFileEngine) {
+      const info = audioEngine.tick(snapshotState());
+      if (info) {
+        if (info.beat !== lastRenderedBeat) {
+          flashBeat(info.beat);
+          lastRenderedBeat = info.beat;
+        }
+      }
+    } else {
+      const now = performance.now();
+      const spb = stepsPerBeat();
+      while (visualQueue.length && visualQueue[0].time <= now) {
+        const q = visualQueue.shift();
+        if (q.step % spb === 0) {
+          flashBeat(q.step / spb);
+        }
+      }
+    }
+    requestAnimationFrame(drawLoop);
+  }
+
+  // ---------- tap tempo ----------
+  let tapTimes = [];
+  function handleTap() {
+    const now = performance.now();
+    if (tapTimes.length && now - tapTimes[tapTimes.length - 1] > 2000) {
+      tapTimes = [];
+    }
+    tapTimes.push(now);
+    if (tapTimes.length > 4) tapTimes.shift();
+    el.tap.classList.add('flash');
+    setTimeout(() => el.tap.classList.remove('flash'), 90);
+    if (tapTimes.length >= 2) {
+      const intervals = [];
+      for (let i = 1; i < tapTimes.length; i++) {
+        intervals.push(tapTimes[i] - tapTimes[i - 1]);
+      }
+      const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      setBpm(Math.round(60000 / avg));
+    }
+  }
+
+  // ---------- segmented controls ----------
+  function updateSegments() {
+    document.querySelectorAll('.segments').forEach(group => {
+      const key = group.dataset.group;
+      const value = state[key];
+      group.querySelectorAll('.seg').forEach(btn => {
+        const match = btn.dataset.value === value;
+        btn.classList.toggle('active', match);
+        btn.setAttribute('aria-checked', match ? 'true' : 'false');
+      });
+    });
+  }
+
+  function handleSegmentClick(e) {
+    const btn = e.target.closest('.seg');
+    if (!btn) return;
+    const group = btn.closest('.segments');
+    const key = group.dataset.group;
+    const value = btn.dataset.value;
+
+    // validate
+    if (key === 'sig' && SIG_BEATS[value] == null) return;
+    if (key === 'sub' && SUB_MAP[value] == null) return;
+    if (key === 'sound' && !SOUNDS[value]) return;
+    if (key === 'accent' && !ACCENT_VALUES[value]) return;
+    if (state[key] === value) return;
+
+    state[key] = value;
+    updateSegments();
+    persist();
+
+    if (key === 'sig') {
+      currentStep = 0;
+      renderBeats();
+    } else if (key === 'sub') {
+      currentStep = 0;
+    } else if (key === 'accent') {
+      // Re-render beat dots so the visual downbeat marker matches the new
+      // audio behavior. No need to reset currentStep — measure position
+      // doesn't shift.
+      renderBeats();
+    } else if (key === 'sound' && !isPlaying && audioEngine !== RenderedFileEngine) {
+      // Preview a downbeat so the user can audition. Suppressed while running
+      // because the scheduler picks up the new sound on the next scheduled click
+      // and a preview on top would sound like an off-grid extra click.
+      // Skipped on iOS (RenderedFileEngine) — the whole point of changing
+      // sound there is to trigger a file re-render with the new sound baked
+      // in. Preview via the Web Audio path would require starting an
+      // AudioContext that we've already established is muted on speaker.
+      try {
+        ensureCtx();
+        audioEngine.play(value, 'down', performance.now() + 20);
+      } catch (err) {}
+    }
+
+    // Notify engine so it can re-render / swap at measure boundary.
+    // Only RenderedFileEngine cares about this — Web Audio picks up the
+    // change naturally on the next scheduled click.
+    if (audioEngine === RenderedFileEngine) {
+      audioEngine.onConfigChange(snapshotState());
+      updateSoundStatusUI();
+    }
+  }
+
+  // ---------- modal ----------
+  // Both Settings and Help use the same modal component. Any modal can be
+  // open at a time; Escape closes whichever is open.
+  let lastFocused = null;
+
+  function openModal(modalEl, focusEl) {
+    lastFocused = document.activeElement;
+    // Close any other open modal first
+    document.querySelectorAll('.modal.open').forEach(m => {
+      if (m !== modalEl) {
+        m.classList.remove('open');
+        m.setAttribute('aria-hidden', 'true');
+      }
+    });
+    modalEl.classList.add('open');
+    modalEl.setAttribute('aria-hidden', 'false');
+    setTimeout(() => { if (focusEl) focusEl.focus(); }, 50);
+  }
+
+  function closeModal(modalEl) {
+    modalEl.classList.remove('open');
+    modalEl.setAttribute('aria-hidden', 'true');
+    if (lastFocused && typeof lastFocused.focus === 'function') {
+      lastFocused.focus();
+    }
+  }
+
+  function openSettings() { openModal(el.modal, el.closeSettings); }
+  function closeSettings() { closeModal(el.modal); }
+  function openHelp() { openModal(el.helpModal, el.closeHelp); }
+  function closeHelp() { closeModal(el.helpModal); }
+
+  function anyModalOpen() {
+    return el.modal.classList.contains('open') ||
+           el.helpModal.classList.contains('open');
+  }
+
+  function closeAnyModal() {
+    if (el.modal.classList.contains('open')) closeModal(el.modal);
+    if (el.helpModal.classList.contains('open')) closeModal(el.helpModal);
+  }
+
+  // ---------- theme ----------
+  // Initial state follows the OS preference. Toggle flips for this session
+  // only — nothing persists. On reload we match OS again. If the OS prefers
+  // changes mid-session AND the user hasn't manually toggled, we follow.
+  const THEME_COLORS = {
+    light: { bg: '#F9F9F9', ink: '#034D32' },
+    dark:  { bg: '#0a1612', ink: '#E4F3EE' }
+  };
+  let themeUserOverride = false;
+
+  function applyTheme(mode) {
+    const c = THEME_COLORS[mode] || THEME_COLORS.light;
+    document.documentElement.setAttribute('data-theme', mode);
+    // Per the Claude-preview dark-mode rule: set bg/color inline on BOTH
+    // documentElement and body, not just via CSS variables.
+    document.documentElement.style.background = c.bg;
+    document.documentElement.style.color = c.ink;
+    document.body.style.background = c.bg;
+    document.body.style.color = c.ink;
+    // Button shows what you'll switch TO, not the current state.
+    el.themeToggle.textContent = mode === 'dark' ? '☀' : '☾';
+    el.themeToggle.setAttribute(
+      'aria-label',
+      mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+    );
+  }
+
+  function toggleTheme() {
+    themeUserOverride = true;
+    const current = document.documentElement.getAttribute('data-theme');
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+  }
+
+  function initTheme() {
+    const mql = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+    applyTheme(mql && mql.matches ? 'dark' : 'light');
+    if (mql && mql.addEventListener) {
+      mql.addEventListener('change', (e) => {
+        if (!themeUserOverride) applyTheme(e.matches ? 'dark' : 'light');
+      });
+    }
+  }
+
+  // ---------- events ----------
+  el.plus.addEventListener('click', () => setBpm(state.bpm + 1));
+  el.minus.addEventListener('click', () => setBpm(state.bpm - 1));
+
+  el.bpm.addEventListener('input', (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (!isNaN(v)) {
+      state.bpm = clampBpm(v);
+      persist();
+    }
+  });
+  el.bpm.addEventListener('blur', () => { el.bpm.value = state.bpm; });
+  el.bpm.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') el.bpm.blur();
+  });
+
+  el.tap.addEventListener('click', handleTap);
+  el.play.addEventListener('click', toggle);
+
+  el.openSettings.addEventListener('click', openSettings);
+  el.closeSettings.addEventListener('click', closeSettings);
+  el.openHelp.addEventListener('click', openHelp);
+  el.closeHelp.addEventListener('click', closeHelp);
+  el.themeToggle.addEventListener('click', toggleTheme);
+
+  document.querySelectorAll('.segments').forEach(group => {
+    group.addEventListener('click', handleSegmentClick);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    // Escape closes whichever modal is open
+    if (e.key === 'Escape' && anyModalOpen()) {
+      e.preventDefault();
+      closeAnyModal();
+      return;
+    }
+    // Don't hijack keys while typing in the BPM input
+    if (e.target === el.bpm) return;
+    // Don't hijack keys while a modal is open (segment buttons need focus/tab)
+    if (anyModalOpen()) return;
+    if (e.code === 'Space') { e.preventDefault(); toggle(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setBpm(state.bpm + 1); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setBpm(state.bpm - 1); }
+    else if (e.key === 't' || e.key === 'T') { handleTap(); }
+    else if (e.key === 's' || e.key === 'S') { e.preventDefault(); openSettings(); }
+    else if (e.key === '?' || e.key === '/') { e.preventDefault(); openHelp(); }
+  });
+
+  window.addEventListener('hashchange', () => {
+    loadState();
+    el.bpm.value = state.bpm;
+    renderBeats();
+    updateSegments();
+  });
+
+  // ---------- init ----------
+  initTheme();
+  loadState();
+  el.bpm.value = state.bpm;
+  renderBeats();
+  updateSegments();
+  persist();
+
+  // ---------- v35: iOS notice, session-end, sound-status UI ----------
+  // Wire up the rendered-file engine's user-facing affordances. No-ops on
+  // non-iOS paths — WebAudioEngine doesn't need any of this.
+
+  const iosNotice = document.getElementById('iosNotice');
+  const sessionEndNotice = document.getElementById('sessionEndNotice');
+  let iosNoticeDismissed = false;
+
+  function openNotice(n) {
+    n.classList.add('open');
+    n.setAttribute('aria-hidden', 'false');
+  }
+  function closeNotice(n) {
+    n.classList.remove('open');
+    n.setAttribute('aria-hidden', 'true');
+  }
+
+  // Sound status UI — small dot inside each sound segment button showing
+  // cache status for that sound at current config/base. Only visible on iOS.
+  function updateSoundStatusUI() {
+    if (audioEngine !== RenderedFileEngine) return;
+    const soundGroup = document.querySelector('.segments[data-group="sound"]');
+    if (!soundGroup) return;
+    const snap = snapshotState();
+    soundGroup.querySelectorAll('.seg').forEach(function (btn) {
+      const soundName = btn.dataset.value;
+      const status = audioEngine.getSoundStatus(soundName, snap);
+      let statusEl = btn.querySelector('.sound-status');
+      if (!statusEl) {
+        statusEl = document.createElement('span');
+        statusEl.className = 'sound-status';
+        btn.appendChild(statusEl);
+      }
+      statusEl.classList.remove('ready', 'queued', 'rendering', 'show');
+      // The currently selected sound's "ready" dot is redundant with the
+      // selected state itself — don't show a dot on the active button
+      // unless it's rendering (waiting to swap in).
+      const isActive = btn.getAttribute('aria-checked') === 'true' || btn.classList.contains('active');
+      if (status === 'ready' && !isActive) {
+        statusEl.classList.add('ready', 'show');
+      } else if (status === 'rendering') {
+        statusEl.classList.add('rendering', 'show');
+      } else if (status === 'queued') {
+        statusEl.classList.add('queued', 'show');
+      }
+    });
+  }
+
+  if (audioEngine === RenderedFileEngine) {
+    // Subscribe to cache/queue status changes so settings UI stays live
+    audioEngine.onStatusChange(updateSoundStatusUI);
+
+    // Session-end: pause is already done inside engine (playing flag flipped
+    // by 'ended' listener). Show modal with Continue / Stop.
+    audioEngine.onSessionEnd(function () {
+      // Drop isPlaying so UI reflects stopped state
+      isPlaying = false;
+      el.play.textContent = 'Start';
+      el.play.classList.remove('playing');
+      clearBeatDots();
+      openNotice(sessionEndNotice);
+    });
+
+    document.getElementById('sessionEndContinue').addEventListener('click', function () {
+      closeNotice(sessionEndNotice);
+      isPlaying = true;
+      el.play.textContent = 'Stop';
+      el.play.classList.add('playing');
+      audioEngine.continueSession(snapshotState());
+      requestAnimationFrame(drawLoop);
+    });
+    document.getElementById('sessionEndStop').addEventListener('click', function () {
+      closeNotice(sessionEndNotice);
+      // isPlaying already false, UI already reset — just close
+    });
+
+    // iOS notice: show on first load. "I understand" dismisses and kicks
+    // off the Phase-1 render in the background so the first Start is
+    // instant (or at least progress-visible).
+    const dismissBtn = document.getElementById('iosNoticeDismiss');
+    dismissBtn.addEventListener('click', function () {
+      iosNoticeDismissed = true;
+      closeNotice(iosNotice);
+      bootRenderedEngine();
+    });
+
+    // Show the notice after layout settles (so the blur looks right)
+    requestAnimationFrame(function () { openNotice(iosNotice); });
+
+    // Boot the rendered engine: Phase 1 blocking render kicks off after
+    // notice dismissal. While rendering, the Play button shows a %.
+    // Start button is interactable but engine.start() will queue-jump
+    // internally if user hits it before Phase 1 completes.
+    function bootRenderedEngine() {
+      el.play.classList.add('booting');
+      el.play.innerHTML = 'Loading <span class="boot-pct">0%</span>';
+      const pctEl = el.play.querySelector('.boot-pct');
+
+      function updateBoot() {
+        const pct = audioEngine.getBootProgress();
+        if (pctEl) pctEl.textContent = pct + '%';
+        if (pct >= 100) {
+          el.play.classList.remove('booting');
+          el.play.textContent = 'Start';
+        }
+      }
+      audioEngine.onStatusChange(updateBoot);
+
+      audioEngine.init(snapshotState()).then(function () {
+        updateBoot();
+        updateSoundStatusUI();
+      }).catch(function (err) {
+        console.error('boot failed:', err);
+        el.play.classList.remove('booting');
+        el.play.textContent = 'Start';
+      });
+    }
+
+    // Initial sound status paint (all will be 'none' until cache populates)
+    updateSoundStatusUI();
+  }
+})();
+</script>
+</body>
+</html>
