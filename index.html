@@ -94,12 +94,31 @@
      highlight, which is the look the rest of t0ck goes for. ::selection
      and ::-moz-selection both needed — they can't be combined into one
      rule because either browser drops the entire rule if it doesn't
-     recognize the pseudo-element. */
+     recognize the pseudo-element.
+
+     (v51) Added explicit input::selection / textarea::selection rules.
+     Some iOS Safari versions don't honor the general ::selection rule
+     inside input/textarea elements even though the spec says they should.
+     Making it explicit is belt-and-suspenders — no harm if the general
+     rule already covered it. Note: the gray pill magnifier / scrubber UI
+     iOS renders on top of number inputs is system chrome, not stylable
+     from CSS. That stays gray. Only the selected-text background within
+     the input itself can be themed. */
   ::selection {
     background: var(--accent);
     color: var(--bg);
   }
   ::-moz-selection {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  input::selection,
+  textarea::selection {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  input::-moz-selection,
+  textarea::-moz-selection {
     background: var(--accent);
     color: var(--bg);
   }
@@ -695,7 +714,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v50 · 20260424</span>
+    <span class="version">v53 · 20260424</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -707,11 +726,14 @@
     <input
       class="bpm-number"
       id="bpm"
-      type="number"
-      min="30"
-      max="300"
-      value="120"
+      type="text"
       inputmode="numeric"
+      pattern="[0-9]*"
+      maxlength="3"
+      value="120"
+      autocomplete="off"
+      autocorrect="off"
+      spellcheck="false"
     >
     <div class="bpm-label">BPM</div>
   </div>
@@ -886,6 +908,9 @@
 // v48 (2026-04-24) — architectural reset. v47 represented the ceiling of the rendered-file approach on iOS: ~330ms file-swap latency even with aggressive pre-rendering and IDB persistence. Several device tests revealed an escape hatch: if an HTMLAudioElement is playing, iOS WebKit honors Web Audio output on the built-in speaker too. This inverts the architecture. v48 uses the same WebAudioEngine on all platforms (same as v01-v24), with one addition on iOS: a near-silent 3-second WAV playing on loop to keep the speaker route open. Silent track is primed on the very first user interaction anywhere on the page (pointerdown/touchstart/keydown), so by the time the user reaches Play the route is already established. Everything v35-v47 added for the rendered-file approach is removed: RenderedFileEngine, blobDB (IndexedDB persistence), iOS browser-limit notice modal, session-end modal + Continue/Stop flow, boot progress % on Play button, per-sound status dots, render-pending shimmer on segment buttons, catching-up state (dim beats + status text), measure-boundary swap, base-tempo architecture, neighborhood pre-rendering queue, lamejs dependency. BPM range restored to 30-300 (v35-v47 capped at 40-320 due to playbackRate math). No session cap. No file swap latency. Sound/sig/sub/accent/BPM changes are all instant because they're just state reads on the next scheduler tick. The iOS path is now identical to the desktop path in every observable way — the silent backing track is the only architectural difference, and it's invisible. This reverts the code to something very close to v34's shape, with one new iosSpeakerKeepalive module adding ~80 lines. The entire 13-version rendered-file saga collapses to an inlined WAV blob and a single-line listener. Evidence path: audio-switch-test-20260424-01 ruled out multi-element approaches; webaudio-unmute-test-20260424-01 confirmed the HTMLAudio-primes-WebAudio behavior; hybrid-edge-test-20260424-01 confirmed the speaker route survives stop/start cycles and that Web Audio's clock is unaffected by the silent track's loop boundaries.
 // v49 (2026-04-24) — BPM input now selects all on focus, so tapping/clicking into the field lets the user immediately type the new value without backspacing out the current one. Fires on both focus and click (iOS Safari doesn't re-fire focus on a second tap of an already-focused input, so without the click handler re-selection wouldn't work). Wrapped in requestAnimationFrame because iOS's focus event fires before the input is fully selectable; RAF defers to the next frame when .select() actually takes effect.
 // v50 (2026-04-24) — branded text selection. Default browser selection highlight (blue/gray) looks out of place against the accent-green palette, especially now that v49 selects BPM text on every focus. ::selection and ::-moz-selection both set to accent background with bg color text — reads as an inverted chip rather than a standard OS highlight, which matches the visual language of the selected segment buttons. Rules split (can't combine) because browsers drop the entire rule if they don't recognize either pseudo. Uses CSS variables, so dark mode auto-inverts correctly.
+// v51 (2026-04-24) — Ron flagged that the BPM input selection was still showing gray on iOS. Investigated: two things overlap on iOS when tapping a number input. (1) The selection-text background WITHIN the input field — which is what v50's ::selection rule was supposed to cover. (2) iOS's native scrubber/magnifier pill that floats on top of number inputs during editing — this is system chrome rendered above the page and cannot be styled from CSS regardless of what we try. The gray in the screenshot was mostly #2, which we can't fix. But to maximize the chance of #1 being green on iOS, added explicit input::selection and textarea::selection rules. The general ::selection rule should cascade into inputs by spec, but some Safari versions don't honor that — belt-and-suspenders here. If BPM selection still looks gray on iOS after v51, it's the system scrubber, not our selection, and nothing in the page's CSS can change it.
+// v52 (2026-04-24) — dropped <input type="number"> in favor of <input type="text" inputmode="numeric" pattern="[0-9]*"> to eliminate iOS's scrubber/magnifier pill overlay that can't be styled. type="text" + inputmode="numeric" gets the same numeric keypad on iOS/Android without the system-chrome scrubber that was causing the gray selection look in v51. Our in-field ::selection now shows green as intended. Trade-offs: (a) lost native HTML5 min/max validation, but we already clamp in setBpm(), so no functional change; (b) lost the browser's up/down stepper arrows, which we never used because we have our own +/- buttons; (c) need to sanitize non-digit input ourselves because type="text" doesn't reject them — added a digit-strip in the input handler for paste/hardware-keyboard edge cases. Added maxlength="3" so the field can't exceed three digits (matches our 300 BPM ceiling). Also set autocomplete="off", autocorrect="off", spellcheck="false" since browsers don't need to suggest completions for a BPM field.
+// v53 (2026-04-24) — iOS was showing an "audio playing" indicator in the system status bar even when the metronome wasn't running. Cause: v48's iosSpeakerKeepalive module started the silent backing track on first user interaction and left it running forever (Option C from the v48 design discussion). That keeps iOS's audio session perpetually active, which lights up the status-bar indicator whenever the user leaves the app. Fix: prime() now pauses the track immediately after the gesture-bound play() resolves — that's enough to establish the speaker route. Added explicit start()/stop() methods that the metronome's start/stop functions now call. Result: silent track only plays while metronome is actually running. Test A from hybrid-edge-test confirmed the speaker route re-establishes cleanly across pause/resume cycles, so this doesn't regress the fundamental fix. Non-iOS platforms are unaffected — they don't reach the keepalive code path.
 (function () {
   'use strict';
 
@@ -1220,21 +1245,41 @@
 
     return {
       // Called once on first user interaction. Primes the audio pipeline
-      // by briefly starting + stopping the element. iOS accepts this as
-      // the "gesture" that establishes speaker access; once primed, future
-      // start() calls don't need to be inside a gesture context.
+      // by briefly starting it, then pausing. iOS accepts this as the
+      // "gesture" that establishes speaker access; subsequent play() calls
+      // from non-gesture contexts (like our metronome start()) will work.
       prime: function () {
         if (primed) return;
         primed = true;
         const a = ensureEl();
         const p = a.play();
-        if (p && p.catch) p.catch(function () {});
-        // Don't stop it — leave it running. Per Option C from v48 design:
-        // silent track runs from first-gesture onwards; toggling it on/off
-        // around metronome state is unnecessary complexity when the cost
-        // of just leaving it on is effectively zero.
+        if (p && p.then) {
+          p.then(function () {
+            // Pause immediately — we just needed the gesture-bound play()
+            // to establish the speaker route. v53: previously we left this
+            // running forever (Option C in v48 design), but that causes
+            // iOS to show an "audio playing" indicator in the status bar
+            // whenever the user leaves t0ck, even when the metronome was
+            // never actually started. Pause after priming and only resume
+            // during actual metronome playback.
+            try { a.pause(); } catch (e) {}
+          }).catch(function () {});
+        }
       },
-      // Exposed for tests / emergency stop, but normally unused.
+      // Called from start() — resume the silent track so Web Audio output
+      // is routed to the speaker. If prime() hasn't been called yet
+      // (shouldn't happen because start() requires a user gesture which
+      // would have triggered prime first), ensureEl() creates it fresh.
+      start: function () {
+        const a = ensureEl();
+        const p = a.play();
+        if (p && p.catch) p.catch(function () {});
+      },
+      // Called from stop() — pause the silent track. This removes the
+      // "audio playing" indicator from iOS's status bar and stops the
+      // backing track from consuming the audio session. Test A in
+      // hybrid-edge-test confirmed the speaker route re-establishes
+      // cleanly on the next play(), so stopping here is safe.
       stop: function () {
         if (audioEl) {
           try { audioEl.pause(); } catch (e) {}
@@ -1315,11 +1360,16 @@
   }
 
   // v48: single engine path (WebAudio) with optional iOS keepalive running
-  // in the background. The silent backing track is started once on first
-  // user interaction (see Option-C setup in init) and runs continuously
-  // thereafter, so start/stop here only touches the scheduler.
+  // in the background. The silent backing track is primed once on first
+  // user interaction (see init) to establish iOS's speaker route. v53:
+  // we now also start/stop the silent track alongside the metronome, so
+  // iOS's "audio playing" status-bar indicator only appears while the
+  // user is actually playing. Non-iOS: iosSpeakerKeepalive.start/stop
+  // are still callable (the module exists globally) but have no perceivable
+  // effect — WebAudio is already unmuted and we don't care about the track.
   function start() {
     ensureCtx();
+    if (isIOS()) iosSpeakerKeepalive.start();
     isPlaying = true;
     currentStep = 0;
     nextTickTime = performance.now() + 60;
@@ -1334,6 +1384,7 @@
     if (schedulerTick) clearInterval(schedulerTick);
     schedulerTick = null;
     visualQueue.length = 0;
+    if (isIOS()) iosSpeakerKeepalive.stop();
     el.play.textContent = 'Start';
     el.play.classList.remove('playing');
     clearBeatDots();
@@ -1558,7 +1609,15 @@
   el.minus.addEventListener('click', () => setBpm(state.bpm - 1));
 
   el.bpm.addEventListener('input', (e) => {
-    const v = parseInt(e.target.value, 10);
+    // (v52) With type="text", we need to sanitize non-digit input ourselves
+    // — type="number" used to reject them at the browser level. The numeric
+    // keypad on iOS/Android shouldn't let non-digits through anyway, but
+    // paste / hardware keyboards / accessibility tools can. Strip in-place
+    // so the visible text always matches what's parseable.
+    const raw = e.target.value;
+    const cleaned = raw.replace(/[^0-9]/g, '');
+    if (cleaned !== raw) e.target.value = cleaned;
+    const v = parseInt(cleaned, 10);
     if (!isNaN(v)) {
       state.bpm = clampBpm(v);
       persist();
