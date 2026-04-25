@@ -150,6 +150,22 @@
     border-radius: 10px;
   }
 
+  /* (v57) Disable double-tap-to-zoom on interactive elements.
+     Real bug Ron caught: tapping the + button twice in quick succession
+     (which is the natural way to bump BPM by 2) was triggering iOS's
+     double-tap-to-zoom gesture, magnifying the whole page. v55's
+     user-scalable=no doesn't prevent this on iOS Safari — that flag
+     only blocks pinch-zoom and focus-input-zoom, not double-tap-zoom.
+     touch-action: manipulation tells the browser "this element handles
+     its own taps, don't apply gesture recognizers like double-tap-zoom
+     or pan." The browser's tap delay (300ms wait to see if it's a
+     double-tap) also goes away as a bonus, so taps feel snappier. */
+  button,
+  .tap, .play, .nudge, .seg, .theme-toggle, .modal-close, .settings-btn,
+  input, label, a {
+    touch-action: manipulation;
+  }
+
   html, body {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background: var(--bg);
@@ -176,6 +192,16 @@
     margin: 0 auto;
     min-height: 100vh;
     min-height: 100dvh;
+    /* (v56) Belt-and-suspenders horizontal overflow guard. The BPM input
+       fix in this version should be enough on its own, but if anything
+       else ever overflows (a long URL, a future widget, an off-by-one
+       calculation), at least iOS won't let the user rubber-band-scroll
+       the whole page sideways — which on tap, looks like the page is
+       jumping when really it's just snapping back. */
+    overflow-x: hidden;
+  }
+  html {
+    overflow-x: hidden;
   }
 
   header {
@@ -281,6 +307,12 @@
   .bpm-display {
     text-align: center;
     user-select: none;
+    /* (v56) max-width keeps the BPM number contained even at very large
+       font-sizes on small viewports. Without this, the 4ch width below
+       (~350-400px at 148px font-size) overflows narrow phone screens
+       and lets iOS rubber-band scroll the body sideways. */
+    max-width: 100%;
+    overflow: hidden;
   }
 
   .bpm-number {
@@ -293,7 +325,12 @@
     background: none;
     border: none;
     outline: none;
-    width: 4ch;
+    /* (v56) was 4ch — too wide for a 3-digit BPM and overflowed phone
+       viewports at the larger font sizes. 3ch is the natural max width
+       given the 30-300 BPM range. max-width:100% ensures we never escape
+       the parent even if font-size scales up further. */
+    width: 3ch;
+    max-width: 100%;
     text-align: center;
     padding: 0;
     -moz-appearance: textfield;
@@ -714,7 +751,7 @@
 <header>
   <div class="brand">t0ck</div>
   <div class="header-meta">
-    <span class="version">v55 · 20260424</span>
+    <span class="version">v57 · 20260424</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
   </div>
 </header>
@@ -913,6 +950,8 @@
 // v53 (2026-04-24) — iOS was showing an "audio playing" indicator in the system status bar even when the metronome wasn't running. Cause: v48's iosSpeakerKeepalive module started the silent backing track on first user interaction and left it running forever (Option C from the v48 design discussion). That keeps iOS's audio session perpetually active, which lights up the status-bar indicator whenever the user leaves the app. Fix: prime() now pauses the track immediately after the gesture-bound play() resolves — that's enough to establish the speaker route. Added explicit start()/stop() methods that the metronome's start/stop functions now call. Result: silent track only plays while metronome is actually running. Test A from hybrid-edge-test confirmed the speaker route re-establishes cleanly across pause/resume cycles, so this doesn't regress the fundamental fix. Non-iOS platforms are unaffected — they don't reach the keepalive code path.
 // v54 (2026-04-24) — v53 introduced a race: rapid stop/start cycles produced silent runs because the silent track's play() promise was still resolving when WebAudio fired its first click, so the click missed the speaker route. Fixed by deferring the pause by 800ms after stop() is called. If the user starts again within that window (which is what rapid toggling looks like), we cancel the pending timer and never actually pause — the speaker route stays open across the toggle. Long pauses still hit the timeout and pause normally, preserving v53's status-bar fix for the case that actually matters (user walks away from the app for a while). 800ms picked as a balance: long enough to absorb tempo scrubbing, sound exploration, and accidental double-taps; short enough that the status indicator clears reasonably promptly when the user actually walks away. Also added an isPaused check in start() so we don't issue a redundant play() during the grace period.
 // v55 (2026-04-24) — iOS Safari was auto-zooming the viewport when users tapped the +/− and tap-tempo buttons. iOS does this when any focusable element has a font-size below 16px (a long-standing "feature" intended to help users read tiny form fields). Our buttons use Space Mono at ~12-14px for visual rhythm. Two fixes available: bump all button text to 16px+ (changes the design language), or disable viewport scaling entirely. Chose the latter via user-scalable=no + maximum-scale=1.0 in the viewport meta. Trade-off: pinch-zoom is now disabled across the whole app. For a metronome — no text content, all interactions are tap-based — this is a defensible call. The auto-zoom was actively breaking the UX (users tapping +/- for fast tempo adjustments saw the page jump and wobble); pinch-zoom was a feature nobody was likely to use here. Net positive on a tool that's specifically designed for one-handed phone use.
+// v56 (2026-04-24) — Ron caught that v55 didn't fully solve the iOS jumping. Looking at the screenshot, the page wasn't auto-zooming (v55 fixed that) — it was scrolling SIDEWAYS. Cause: .bpm-number had width:4ch at font-size:148px which works out to ~350-400px wide for Space Mono, exceeding narrow phone viewports after body padding. The body became horizontally scrollable, and any tap let iOS rubber-band-scroll it sideways with a snap-back, looking like a "jump." Two-part fix: (1) reduced .bpm-number width from 4ch to 3ch — BPM is always 3 digits or fewer (range 30-300), so the extra character was buying nothing but overflow. (2) Added overflow-x:hidden on html and body as belt-and-suspenders so any future overflow (long URLs, new widgets) can't reintroduce the sideways scroll. Also added max-width:100% + overflow:hidden on .bpm-display itself for the same reason. v55's user-scalable=no was still the right fix for the tap-zoom-on-small-fonts issue; this is a separate orthogonal fix.
+// v57 (2026-04-24) — turned out the v56 diagnosis was wrong. Ron sent a video showing the actual behavior: tapping the + button twice in quick succession was triggering iOS's double-tap-to-zoom gesture, NOT horizontal overflow. v55's user-scalable=no doesn't block double-tap-zoom on iOS Safari — that flag only governs pinch-zoom and focus-input zoom. The fix for double-tap-zoom is touch-action:manipulation, which tells the browser "this element handles its own gestures, don't apply pan/zoom recognizers." Added globally to all interactive elements (buttons, segments, inputs, etc.). Bonus: also eliminates iOS's legacy 300ms tap delay (which the browser used to wait to see if a tap was actually a double-tap), so all taps feel snappier. The v56 changes (BPM input width 4ch → 3ch, html/body overflow-x:hidden) are kept — they're correct on their own merits (3ch IS the right width for a 3-digit-max field; overflow-x:hidden IS a reasonable safety net) — but they weren't fixing the bug Ron was seeing.
 (function () {
   'use strict';
 
