@@ -219,6 +219,13 @@
     letter-spacing: -0.02em;
     color: var(--ink);
   }
+  /* (v59) Brand wordmark: the "0" in t0ck renders in accent green per
+     the 0fam house style (every product in the family — marg0, b0p,
+     d00r, b0ng0, etc. — paints the substituted zero in the same accent
+     so it reads as a connected family-mark rather than just a name). */
+  .brand .zero {
+    color: var(--accent);
+  }
 
   .version {
     font-family: 'Space Mono', monospace;
@@ -244,9 +251,6 @@
     height: 28px;
     border-radius: 50%;
     cursor: pointer;
-    font-family: 'Space Mono', monospace;
-    font-size: 13px;
-    line-height: 1;
     padding: 0;
     display: inline-flex;
     align-items: center;
@@ -261,6 +265,28 @@
   }
 
   .theme-toggle:active { transform: scale(0.92); }
+
+  /* (v58) Sun/moon icons. Both rendered in DOM at all times; CSS picks
+     which one is visible based on the current theme attribute. The
+     button shows what you'll switch TO, so when in light mode we show
+     the moon (theme-icon-dark = "go to dark"), and vice versa. Inherits
+     stroke color from .theme-toggle's color, so hover state turns icons
+     green automatically.
+
+     Default state (no data-theme attribute yet, e.g. during initial page
+     parse before JS runs) shows the moon — the most common starting
+     state is light mode, where the user would tap to go dark. Prevents
+     a flash of empty button before initTheme() runs. */
+  .theme-toggle svg {
+    width: 14px;
+    height: 14px;
+    display: none;
+  }
+  .theme-toggle .theme-icon-dark { display: block; }
+  html[data-theme="light"] .theme-toggle .theme-icon-light { display: none; }
+  html[data-theme="light"] .theme-toggle .theme-icon-dark { display: block; }
+  html[data-theme="dark"] .theme-toggle .theme-icon-dark { display: none; }
+  html[data-theme="dark"] .theme-toggle .theme-icon-light { display: block; }
 
   main {
     flex: 1;
@@ -303,6 +329,83 @@
 
   /* (v48) .beats-wrap and .catch-up-status removed — see the comment
      block further down where all v35-v47 engine UI was stripped. */
+
+  /* (v61) Grouping affordance. Sits centered below the beat dots and
+     only appears when the current sig is an odd meter with groupings.
+     Designed to look like ambient metadata, not a primary control —
+     small mono text in muted color, no border or background until
+     hover/focus. Tapping opens the popover. */
+  .grouping-wrap {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    margin-top: 14px;
+  }
+  .grouping-wrap[hidden] { display: none; }
+  .grouping-chip {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms, color 120ms;
+  }
+  .grouping-chip:hover {
+    background: var(--accent-bg);
+    border-color: var(--border);
+    color: var(--accent);
+  }
+  .grouping-chip[aria-expanded="true"] {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  /* Popover is positioned below the chip. On phones this can collide
+     with footer; we cap max-height and let it scroll. */
+  .grouping-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 140px;
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .grouping-popover[hidden] { display: none; }
+  .grouping-option {
+    background: transparent;
+    border: none;
+    color: var(--ink);
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: center;
+    white-space: nowrap;
+    transition: background 100ms, color 100ms;
+  }
+  .grouping-option:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+  .grouping-option.active {
+    background: var(--accent);
+    color: var(--seg-active-text);
+  }
 
   .bpm-display {
     text-align: center;
@@ -633,6 +736,70 @@
     color: var(--seg-active-text);
   }
 
+  /* (v60) Odd-meters accordion. Sits below the common time signatures
+     in the same group. Closed by default. The toggle is intentionally
+     understated — small text, no border, just a label and chevron — so
+     it doesn't visually compete with the primary segments above. */
+  .odd-meters-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: none;
+    padding: 14px 0 6px 0;
+    margin-top: 4px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    cursor: pointer;
+    transition: color 120ms;
+    width: 100%;
+  }
+  .odd-meters-toggle:hover { color: var(--accent); }
+  .odd-meters-chevron {
+    width: 12px;
+    height: 12px;
+    transition: transform 200ms ease;
+  }
+  .odd-meters-toggle[aria-expanded="true"] .odd-meters-chevron {
+    transform: rotate(180deg);
+  }
+
+  .odd-meters-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 4px;
+  }
+  .odd-meters-panel[hidden] { display: none; }
+
+  /* Compact denominator label sitting above each row. Smaller than
+     .group-label so it reads as a sub-header rather than a peer. */
+  .odd-meters-row-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+    margin: 8px 0 2px 2px;
+  }
+  .odd-meters-row-label:first-child { margin-top: 0; }
+
+  /* Odd-meters segments use a smaller min-width since we're packing
+     more options per row, and wrap to multiple lines on narrow screens.
+     The base .seg flex: 1 would stretch each button equally — that's
+     fine for 3-9 buttons in a row; on phones it wraps cleanly. */
+  .segments-odd {
+    flex-wrap: wrap;
+  }
+  .segments-odd .seg {
+    flex: 1 1 60px;
+    min-height: 42px;
+    padding: 10px 4px;
+    font-size: 12px;
+  }
+
   .modal-footer-note {
     font-family: 'Space Mono', monospace;
     font-size: 11px;
@@ -749,15 +916,55 @@
 <body style="background:#F9F9F9;color:#034D32">
 
 <header>
-  <div class="brand">t0ck</div>
+  <div class="brand">t<span class="zero">0</span>ck</div>
   <div class="header-meta">
-    <span class="version">v57 · 20260424</span>
-    <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">☾</button>
+    <span class="version">v61 · 20260424</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Switch to dark mode" title="Switch theme">
+      <!-- (v58) Replaced unicode ☾/☀ with line-art SVGs matching the
+           rest of the 0fam family (c0nvert.app uses the same set).
+           Both icons live in the DOM permanently; CSS shows only the
+           relevant one based on data-theme. The button shows what you'll
+           switch TO, not the current state — so we show the sun when in
+           dark mode and the moon when in light mode. -->
+      <svg class="theme-icon theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2"/>
+        <path d="M12 20v2"/>
+        <path d="m4.93 4.93 1.41 1.41"/>
+        <path d="m17.66 17.66 1.41 1.41"/>
+        <path d="M2 12h2"/>
+        <path d="M20 12h2"/>
+        <path d="m6.34 17.66-1.41 1.41"/>
+        <path d="m19.07 4.93-1.41 1.41"/>
+      </svg>
+      <svg class="theme-icon theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
   </div>
 </header>
 
 <main>
   <div class="beats" id="beats"></div>
+
+  <!-- (v61) Grouping affordance. Hidden by default; shown when current
+       sig is an odd meter that has groupings. Click opens a popover
+       with the available grouping options for the active sig. -->
+  <div class="grouping-wrap" id="groupingWrap" hidden>
+    <button
+      type="button"
+      class="grouping-chip"
+      id="groupingChip"
+      aria-haspopup="true"
+      aria-expanded="false"
+      aria-label="Beat grouping"
+    >
+      <span class="grouping-chip-label" id="groupingChipLabel">2+2+3</span>
+    </button>
+    <div class="grouping-popover" id="groupingPopover" hidden role="menu" aria-label="Choose beat grouping">
+      <!-- options populated dynamically per sig -->
+    </div>
+  </div>
 
   <div class="bpm-display">
     <input
@@ -814,6 +1021,59 @@
           <button class="seg" data-value="6/8" role="radio">6/8</button>
           <button class="seg" data-value="2/4" role="radio">2/4</button>
           <button class="seg" data-value="5/4" role="radio">5/4</button>
+        </div>
+
+        <!-- (v60) Odd-meters accordion. Hidden by default to keep the
+             main UI calm for the 95% of users who only use common
+             meters. Auto-opens when the current state.sig is one of
+             the odd values, so a user who reloaded after picking 11/8
+             sees their selection and the panel that contains it. The
+             three rows are grouped by denominator because charts
+             traditionally separate them that way (a bassist looking
+             for 7/8 ignores the 7/4 row visually). -->
+        <button
+          type="button"
+          class="odd-meters-toggle"
+          id="oddMetersToggle"
+          aria-expanded="false"
+          aria-controls="oddMetersPanel"
+        >
+          <span class="odd-meters-label">Odd meters</span>
+          <svg class="odd-meters-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <div class="odd-meters-panel" id="oddMetersPanel" hidden>
+          <div class="odd-meters-row-label">/4</div>
+          <div class="segments segments-odd" data-group="sig" role="radiogroup" aria-label="Odd meters with quarter-note denominator">
+            <button class="seg" data-value="7/4" role="radio">7/4</button>
+            <button class="seg" data-value="9/4" role="radio">9/4</button>
+            <button class="seg" data-value="11/4" role="radio">11/4</button>
+          </div>
+          <div class="odd-meters-row-label">/8</div>
+          <div class="segments segments-odd" data-group="sig" role="radiogroup" aria-label="Odd meters with eighth-note denominator">
+            <button class="seg" data-value="5/8" role="radio">5/8</button>
+            <button class="seg" data-value="7/8" role="radio">7/8</button>
+            <button class="seg" data-value="9/8" role="radio">9/8</button>
+            <button class="seg" data-value="11/8" role="radio">11/8</button>
+            <button class="seg" data-value="13/8" role="radio">13/8</button>
+            <button class="seg" data-value="15/8" role="radio">15/8</button>
+            <button class="seg" data-value="17/8" role="radio">17/8</button>
+            <button class="seg" data-value="19/8" role="radio">19/8</button>
+            <button class="seg" data-value="21/8" role="radio">21/8</button>
+          </div>
+          <div class="odd-meters-row-label">/16</div>
+          <div class="segments segments-odd" data-group="sig" role="radiogroup" aria-label="Odd meters with sixteenth-note denominator">
+            <button class="seg" data-value="5/16" role="radio">5/16</button>
+            <button class="seg" data-value="7/16" role="radio">7/16</button>
+            <button class="seg" data-value="9/16" role="radio">9/16</button>
+            <button class="seg" data-value="11/16" role="radio">11/16</button>
+            <button class="seg" data-value="13/16" role="radio">13/16</button>
+            <button class="seg" data-value="15/16" role="radio">15/16</button>
+            <button class="seg" data-value="17/16" role="radio">17/16</button>
+            <button class="seg" data-value="19/16" role="radio">19/16</button>
+            <button class="seg" data-value="21/16" role="radio">21/16</button>
+          </div>
         </div>
       </div>
 
@@ -952,6 +1212,10 @@
 // v55 (2026-04-24) — iOS Safari was auto-zooming the viewport when users tapped the +/− and tap-tempo buttons. iOS does this when any focusable element has a font-size below 16px (a long-standing "feature" intended to help users read tiny form fields). Our buttons use Space Mono at ~12-14px for visual rhythm. Two fixes available: bump all button text to 16px+ (changes the design language), or disable viewport scaling entirely. Chose the latter via user-scalable=no + maximum-scale=1.0 in the viewport meta. Trade-off: pinch-zoom is now disabled across the whole app. For a metronome — no text content, all interactions are tap-based — this is a defensible call. The auto-zoom was actively breaking the UX (users tapping +/- for fast tempo adjustments saw the page jump and wobble); pinch-zoom was a feature nobody was likely to use here. Net positive on a tool that's specifically designed for one-handed phone use.
 // v56 (2026-04-24) — Ron caught that v55 didn't fully solve the iOS jumping. Looking at the screenshot, the page wasn't auto-zooming (v55 fixed that) — it was scrolling SIDEWAYS. Cause: .bpm-number had width:4ch at font-size:148px which works out to ~350-400px wide for Space Mono, exceeding narrow phone viewports after body padding. The body became horizontally scrollable, and any tap let iOS rubber-band-scroll it sideways with a snap-back, looking like a "jump." Two-part fix: (1) reduced .bpm-number width from 4ch to 3ch — BPM is always 3 digits or fewer (range 30-300), so the extra character was buying nothing but overflow. (2) Added overflow-x:hidden on html and body as belt-and-suspenders so any future overflow (long URLs, new widgets) can't reintroduce the sideways scroll. Also added max-width:100% + overflow:hidden on .bpm-display itself for the same reason. v55's user-scalable=no was still the right fix for the tap-zoom-on-small-fonts issue; this is a separate orthogonal fix.
 // v57 (2026-04-24) — turned out the v56 diagnosis was wrong. Ron sent a video showing the actual behavior: tapping the + button twice in quick succession was triggering iOS's double-tap-to-zoom gesture, NOT horizontal overflow. v55's user-scalable=no doesn't block double-tap-zoom on iOS Safari — that flag only governs pinch-zoom and focus-input zoom. The fix for double-tap-zoom is touch-action:manipulation, which tells the browser "this element handles its own gestures, don't apply pan/zoom recognizers." Added globally to all interactive elements (buttons, segments, inputs, etc.). Bonus: also eliminates iOS's legacy 300ms tap delay (which the browser used to wait to see if a tap was actually a double-tap), so all taps feel snappier. The v56 changes (BPM input width 4ch → 3ch, html/body overflow-x:hidden) are kept — they're correct on their own merits (3ch IS the right width for a 3-digit-max field; overflow-x:hidden IS a reasonable safety net) — but they weren't fixing the bug Ron was seeing.
+// v58 (2026-04-24) — replaced unicode theme-toggle icons (☾ moon / ☀ sun) with line-art SVGs matching the rest of the 0fam family (c0nvert.app uses the same set). Unicode chars render unpredictably across platforms — Apple Color Emoji can sneak in for the sun glyph on macOS, the moon on Android renders as a hollow outline vs filled, etc. SVGs render identically everywhere and inherit currentColor for clean palette integration. Both icons live in the DOM permanently; CSS shows only the relevant one based on html[data-theme] attribute. Default state (before initTheme() runs) shows the moon, since light mode is the more common starting state and showing nothing during the JS-init window would flash an empty button. Stroke uses currentColor so the hover-turns-icon-green effect from .theme-toggle:hover works automatically. Removed the textContent swap from applyTheme() — CSS owns icon visibility now.
+// v59 (2026-04-24) — applied 0fam house-style accent color to the brand wordmark's "0" character. Every product in the family substitutes a zero for an o (marg0, b0p, d00r, b0ng0, c0nvert, etc.) and paints that zero in the accent green to make the substitution legible at a glance. t0ck was the holdout — the wordmark was uniform ink color. Now matches the rest of the family. Implementation is just a single span around the "0" in the markup with a .zero class that applies var(--accent). Dark mode auto-inherits the dark-mode accent without extra rules.
+// v60 (2026-04-24) — added 22 odd time signatures (a bassist friend asked). Common meters (4/4, 3/4, 6/8, 2/4, 5/4) stay in the main row to keep the default UI calm for the 95% of users who never need anything else. Everything else lives in a collapsed "Odd meters" accordion below: 7/4, 9/4, 11/4 in the /4 row; 5/8, 7/8, 9/8, 11/8, 13/8, 15/8, 17/8, 19/8, 21/8 in the /8 row; same numerators paired with /16 in the /16 row. The accordion auto-opens when state.sig is currently set to an odd meter (so a user reloading after picking 11/8 sees their selection in context, not hidden behind a closed panel) and auto-closes when they pick a common meter (treating the panel like temporary scratch space rather than a persistent preference). Engine is unchanged — the scheduler only cares about the numerator (beat count per measure), so adding 22 more sigs to SIG_BEATS map was effectively free. Skipped 1/x (no measure), 4/8 (= 2/4 mathematically — duplicate notation), and very high numerators (23+) where the user is really stacking smaller meters mentally. Per Ron's feedback: don't curate too aggressively in the hidden panel — its whole purpose is being a deep menu for power users, so the "noise penalty" of more options is approximately zero.
+// v61 (2026-04-24) — added beat groupings for odd meters via progressive disclosure. The bassist-friend follow-up: 7/8 felt like a flat 7-beat measure with only the downbeat accented, but in real music 7/8 has internal accents at the start of each sub-group (e.g., 2+2+3 accents beats 1, 3, 5). Added a small chip below the beat dots that shows the current grouping (like "2+2+3") and opens a popover on tap with all valid alternatives for that meter. Hidden entirely for common meters (4/4, 3/4, 2/4, 6/8, 5/4) to keep the main UI calm; appears automatically when an odd meter is selected. GROUPINGS data table covers all 22 odd meters with sensible defaults (5/8 → 3+2 Bulgarian/jazz; 7/8 → 2+2+3 most rock/prog; 9/8 → 3+3+3 Blue Rondo; etc.) and 2-7 alternatives per meter — pulling from real practical readings rather than mathematical exhaustion. Engine: scheduleClick now reads activeGrouping() and demotes intra-group beats from 'main' to 'sub' so the listener hears the grouping. Group accent is the existing 'main' tier — no new sound recipes needed. With subdivisions on, the grouping is still audible but compressed (group-starts and intra-group main beats both become 'main' against the 'sub' subdivision texture). State: state.grouping is null when default, array when overridden. Persisted in localStorage under "grp" but NOT in URL hash — keeps shareable links clean and means a shared 7/8 link plays the canonical 2+2+3 grouping for the recipient regardless of the sender's preference. Sig change resets state.grouping to null since old groupings won't sum correctly to a new sig's beat count.
 (function () {
   'use strict';
 
@@ -961,11 +1225,119 @@
     sig: '4/4',
     sub: 'off',
     sound: 'sine',
-    accent: 'on'
+    accent: 'on',
+    // (v61) Beat grouping for odd meters. null = use default for current
+    // sig. Array (e.g., [2,2,3]) = explicit grouping. Common meters
+    // ignore this. See GROUPINGS / activeGrouping() below.
+    grouping: null
   };
 
   const SUB_MAP = { off: 1, '8': 2, '16': 4, '3': 3 };
-  const SIG_BEATS = { '4/4': 4, '3/4': 3, '6/8': 6, '2/4': 2, '5/4': 5 };
+  // (v60) Expanded time signatures. Main row in the UI keeps the
+  // common 5 (4/4, 3/4, 6/8, 2/4, 5/4); everything else lives in an
+  // accordion labeled "Odd meters." From a scheduler standpoint, only
+  // the numerator (beat count per measure) matters — the denominator
+  // affects notation and feel but not click timing. So the engine
+  // treats 7/8 and 7/16 identically. Practical list spans /4, /8,
+  // and /16 denominators because real charts do; we skip 1/x (no
+  // measure) and 4/8 (same as 2/4 — duplicate).
+  const SIG_BEATS = {
+    '4/4': 4, '3/4': 3, '6/8': 6, '2/4': 2, '5/4': 5,
+    '7/4': 7, '9/4': 9, '11/4': 11,
+    '5/8': 5, '7/8': 7, '9/8': 9, '11/8': 11,
+    '13/8': 13, '15/8': 15, '17/8': 17, '19/8': 19, '21/8': 21,
+    '5/16': 5, '7/16': 7, '9/16': 9, '11/16': 11,
+    '13/16': 13, '15/16': 15, '17/16': 17, '19/16': 19, '21/16': 21
+  };
+
+  // (v61) Groupings — how an odd meter's beats are clustered into
+  // sub-accents. Each grouping is an array of group sizes that sums
+  // to the meter's beat count. E.g., 7/8 grouped [2,2,3] means
+  // accents land on beats 1, 3, 5 (start of each group) with beat 1
+  // additionally getting the downbeat treatment. [3,2,2] would
+  // accent beats 1, 4, 6.
+  //
+  // Defaults reflect the most common practical reading: 5/8 → 3+2
+  // (Bulgarian/jazz tradition), 7/8 → 2+2+3 (most rock/prog), 9/8
+  // → 2+2+2+3 (Brubeck Blue Rondo), etc. Where there's strong
+  // ambiguity we pick what's most common in popular music since the
+  // user's bassist friend is the target audience.
+  //
+  // Common meters (4/4, 3/4, 2/4, 6/8, 5/4) intentionally have NO
+  // entry here — they don't show the grouping picker. Their natural
+  // grouping is implicit (one click per beat, no sub-accents needed).
+  // 5/4 is borderline but ships without grouping picker because
+  // virtually all 5/4 in popular music is felt as a flat 5 (Take Five,
+  // Mission Impossible). If a user wants grouped 5, they can mentally
+  // remap or wait for a future refinement.
+  const GROUPINGS = {
+    '5/8':  [[3,2], [2,3]],
+    '7/8':  [[2,2,3], [3,2,2], [2,3,2], [4,3], [3,4]],
+    '9/8':  [[3,3,3], [2,2,2,3], [3,2,2,2], [2,3,2,2], [2,2,3,2], [4,5], [5,4]],
+    '11/8': [[3,3,3,2], [2,2,3,2,2], [3,2,2,2,2], [4,4,3], [4,3,4], [3,4,4]],
+    '13/8': [[3,3,3,2,2], [2,2,2,3,2,2], [4,4,5], [5,4,4]],
+    '15/8': [[3,3,3,3,3], [4,4,4,3], [5,5,5], [2,2,2,2,2,2,3]],
+    '17/8': [[2,2,3,2,2,2,2,2], [3,3,3,3,3,2], [4,4,4,5]],
+    '19/8': [[3,3,3,3,3,2,2], [4,4,4,4,3], [2,2,2,3,2,2,2,2,2]],
+    '21/8': [[3,3,3,3,3,3,3], [2,2,3,2,2,3,2,2,3], [7,7,7]],
+    '7/4':  [[2,2,3], [3,2,2], [4,3], [3,4]],
+    '9/4':  [[3,3,3], [2,2,2,3], [4,5], [5,4]],
+    '11/4': [[3,3,3,2], [4,4,3], [2,2,3,2,2]],
+    '5/16': [[3,2], [2,3]],
+    '7/16': [[2,2,3], [3,2,2], [2,3,2], [4,3]],
+    '9/16': [[3,3,3], [2,2,2,3], [4,5]],
+    '11/16':[[3,3,3,2], [2,2,3,2,2], [4,4,3]],
+    '13/16':[[3,3,3,2,2], [2,2,2,3,2,2], [4,4,5]],
+    '15/16':[[3,3,3,3,3], [4,4,4,3]],
+    '17/16':[[2,2,3,2,2,2,2,2], [3,3,3,3,3,2]],
+    '19/16':[[3,3,3,3,3,2,2], [4,4,4,4,3]],
+    '21/16':[[3,3,3,3,3,3,3], [2,2,3,2,2,3,2,2,3]]
+  };
+
+  // True if the given sig has groupings configured (i.e., is an odd
+  // meter where the picker should appear).
+  function hasGroupings(sig) {
+    return GROUPINGS[sig] != null && GROUPINGS[sig].length > 0;
+  }
+
+  // Default grouping for a sig (first entry by convention) — used
+  // when state.grouping is null/missing for a sig that supports it.
+  function defaultGrouping(sig) {
+    const opts = GROUPINGS[sig];
+    return opts && opts.length > 0 ? opts[0].slice() : null;
+  }
+
+  // Currently active grouping for state. Returns array (e.g., [2,2,3])
+  // or null if the current sig doesn't use groupings.
+  function activeGrouping() {
+    if (!hasGroupings(state.sig)) return null;
+    if (state.grouping && state.grouping.length > 0) {
+      // Validate: must sum to the sig's beat count. If state has a stale
+      // grouping from a different sig (user switched), fall back to default.
+      const sum = state.grouping.reduce(function (a, b) { return a + b; }, 0);
+      if (sum === SIG_BEATS[state.sig]) return state.grouping.slice();
+    }
+    return defaultGrouping(state.sig);
+  }
+
+  // Set of step indices in the current measure that are group-starts
+  // (excluding the downbeat which is always step 0). Used by
+  // scheduleClick to decide which beats get 'main' vs 'sub' accent.
+  function groupStartSteps(grouping, stepsPerBeatVal) {
+    if (!grouping) return null;
+    const set = new Set();
+    let runningBeat = 0;
+    for (let i = 1; i < grouping.length; i++) {
+      runningBeat += grouping[i - 1];
+      set.add(runningBeat * stepsPerBeatVal);
+    }
+    return set;
+  }
+
+  // Format a grouping array as display string. [2,2,3] → "2+2+3"
+  function groupingLabel(g) {
+    return g ? g.join('+') : '';
+  }
   const ACCENT_VALUES = { on: 1, off: 1 };
   const STORAGE_KEY = 't0ck-state';
 
@@ -1020,7 +1392,16 @@
   }
 
   function encodePrefs() {
-    return `sig=${encodeURIComponent(state.sig)}&sub=${state.sub}&snd=${state.sound}&acc=${state.accent}`;
+    let s = `sig=${encodeURIComponent(state.sig)}&sub=${state.sub}&snd=${state.sound}&acc=${state.accent}`;
+    // (v61) Grouping persisted only in localStorage, not in URL hash —
+    // keeps shareable links short and the default grouping is musically
+    // sensible for any odd meter (someone who shares a 7/8 link probably
+    // wants the recipient to hear the canonical 2+2+3, not whatever
+    // they personally fiddled with). User's own device still remembers.
+    if (state.grouping && state.grouping.length > 0) {
+      s += '&grp=' + state.grouping.join('-');
+    }
+    return s;
   }
 
   function persist() {
@@ -1061,6 +1442,14 @@
     if (snd && SOUNDS[snd]) state.sound = snd;
     const acc = params.get('acc');
     if (acc && ACCENT_VALUES[acc]) state.accent = acc;
+    // (v61) Grouping format: "2-2-3" (dash-separated to survive URL encoding)
+    const grp = params.get('grp');
+    if (grp) {
+      const parsed = grp.split('-').map(function (n) { return parseInt(n, 10); });
+      if (parsed.every(function (n) { return !isNaN(n) && n > 0; }) && parsed.length > 1) {
+        state.grouping = parsed;
+      }
+    }
   }
 
   function loadState() {
@@ -1405,7 +1794,39 @@
     const isMainBeat = step % spb === 0;
     const isDownbeat = step === 0;
     const accentActive = state.accent === 'on';
-    const accent = (isDownbeat && accentActive) ? 'down' : isMainBeat ? 'main' : 'sub';
+
+    // (v61) Group-aware accent logic. When the current sig has a
+    // grouping (e.g., 7/8 as 2+2+3), beats at the start of each group
+    // get 'main' accent and other regular beats drop to 'sub'.
+    // Without groupings, behavior is identical to v60: every regular
+    // beat is 'main', subdivisions are 'sub'.
+    //
+    // One notable interaction: with subdivisions ON, both group-starts
+    // and intra-group beats land at step boundaries that are multiples
+    // of stepsPerBeat. Both are "main beats" by the isMainBeat check.
+    // The grouping demotes intra-group beats to 'sub' so the listener
+    // hears the grouping. Subdivisions (non-main-beat steps) stay 'sub'
+    // — they share the tier with intra-group beats, which means
+    // grouped 7/8 + 16ths sounds like: DOWN-sub-sub-sub-MAIN-sub-sub-
+    // sub-sub-sub-sub-sub-MAIN-sub-sub-sub-... etc. Fewer than four
+    // tiers of intensity, but the grouping is still audible against
+    // the steady subdivision texture. A future v62 could introduce a
+    // fourth accent level if this trade-off feels weak in practice.
+    let accent;
+    if (isDownbeat && accentActive) {
+      accent = 'down';
+    } else if (isMainBeat) {
+      const grouping = activeGrouping();
+      if (grouping && accentActive) {
+        const groupStarts = groupStartSteps(grouping, spb);
+        accent = groupStarts.has(step) ? 'main' : 'sub';
+      } else {
+        accent = 'main';
+      }
+    } else {
+      accent = 'sub';
+    }
+
     audioEngine.play(state.sound, accent, timeMs);
     visualQueue.push({ step: step, time: timeMs, scheduledAt: timeMs });
   }
@@ -1525,6 +1946,13 @@
   }
 
   // ---------- segmented controls ----------
+  // (v60) Set of common time signatures shown in the main row above
+  // the accordion. Anything not in this set lives inside the accordion
+  // and triggers auto-open when selected. Kept as a small static set
+  // rather than computing dynamically — easier to maintain and the list
+  // shouldn't change without an explicit design decision.
+  const COMMON_SIGS = new Set(['4/4', '3/4', '6/8', '2/4', '5/4']);
+
   function updateSegments() {
     document.querySelectorAll('.segments').forEach(group => {
       const key = group.dataset.group;
@@ -1535,6 +1963,117 @@
         btn.setAttribute('aria-checked', match ? 'true' : 'false');
       });
     });
+    // Sync the odd-meters accordion to the current sig. If the user
+    // landed on an odd meter (via URL hash, localStorage, or whatever),
+    // open the panel so they can see it. If they're on a common meter,
+    // close it. Manual toggle by the user is preserved within a session
+    // — once they click it open, it stays open until they pick a common
+    // meter, at which point we collapse it again. That last bit is the
+    // judgment call: arguably "user opened it manually, leave it open"
+    // is also defensible. Auto-collapse on common-meter selection feels
+    // cleaner because the panel returning to its default state matches
+    // the user's apparent intent (they're done with odd meters).
+    syncOddMetersAccordion();
+    // (v61) Refresh the grouping chip below the beat dots — it shows when
+    // state.sig is an odd meter and hides otherwise, with the current
+    // grouping label and option list.
+    updateGroupingAffordance();
+  }
+
+  function syncOddMetersAccordion() {
+    const toggle = document.getElementById('oddMetersToggle');
+    const panel = document.getElementById('oddMetersPanel');
+    if (!toggle || !panel) return;
+    const shouldBeOpen = !COMMON_SIGS.has(state.sig);
+    setOddMetersOpen(shouldBeOpen);
+  }
+
+  function setOddMetersOpen(open) {
+    const toggle = document.getElementById('oddMetersToggle');
+    const panel = document.getElementById('oddMetersPanel');
+    if (!toggle || !panel) return;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) panel.removeAttribute('hidden');
+    else panel.setAttribute('hidden', '');
+  }
+
+  // (v61) Grouping affordance: small chip below the beat dots that
+  // shows the current grouping for odd meters and opens a popover with
+  // alternative groupings. Only visible when state.sig has groupings
+  // configured.
+  function updateGroupingAffordance() {
+    const wrap = document.getElementById('groupingWrap');
+    const chipLabel = document.getElementById('groupingChipLabel');
+    const popover = document.getElementById('groupingPopover');
+    if (!wrap || !chipLabel || !popover) return;
+
+    if (!hasGroupings(state.sig)) {
+      wrap.setAttribute('hidden', '');
+      closeGroupingPopover();
+      return;
+    }
+
+    wrap.removeAttribute('hidden');
+    const current = activeGrouping();
+    chipLabel.textContent = groupingLabel(current);
+
+    // Rebuild popover options for the current sig. Cleared each time
+    // because options change with sig.
+    popover.innerHTML = '';
+    const options = GROUPINGS[state.sig];
+    options.forEach(function (opt) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'grouping-option';
+      btn.setAttribute('role', 'menuitemradio');
+      btn.textContent = groupingLabel(opt);
+      const isActive = current && current.length === opt.length &&
+        current.every(function (n, i) { return n === opt[i]; });
+      if (isActive) {
+        btn.classList.add('active');
+        btn.setAttribute('aria-checked', 'true');
+      } else {
+        btn.setAttribute('aria-checked', 'false');
+      }
+      btn.addEventListener('click', function () {
+        // Persist as null if the user picked the default — keeps state
+        // minimal and means a future change to GROUPINGS defaults will
+        // be picked up automatically.
+        const isDefault = opt.length === options[0].length &&
+          opt.every(function (n, i) { return n === options[0][i]; });
+        state.grouping = isDefault ? null : opt.slice();
+        persist();
+        updateGroupingAffordance();
+        closeGroupingPopover();
+        // No engine notification needed — the next scheduled tick reads
+        // activeGrouping() fresh from state. Same model as sound/sub.
+      });
+      popover.appendChild(btn);
+    });
+  }
+
+  function openGroupingPopover() {
+    const chip = document.getElementById('groupingChip');
+    const popover = document.getElementById('groupingPopover');
+    if (!chip || !popover) return;
+    chip.setAttribute('aria-expanded', 'true');
+    popover.removeAttribute('hidden');
+  }
+
+  function closeGroupingPopover() {
+    const chip = document.getElementById('groupingChip');
+    const popover = document.getElementById('groupingPopover');
+    if (!chip || !popover) return;
+    chip.setAttribute('aria-expanded', 'false');
+    popover.setAttribute('hidden', '');
+  }
+
+  function toggleGroupingPopover() {
+    const chip = document.getElementById('groupingChip');
+    if (!chip) return;
+    const isOpen = chip.getAttribute('aria-expanded') === 'true';
+    if (isOpen) closeGroupingPopover();
+    else openGroupingPopover();
   }
 
   function handleSegmentClick(e) {
@@ -1557,7 +2096,13 @@
 
     if (key === 'sig') {
       currentStep = 0;
+      // (v61) Reset grouping when sig changes — a stale grouping from
+      // a different sig won't sum correctly. activeGrouping() guards
+      // against this at read time, but clearing here keeps state honest.
+      state.grouping = null;
       renderBeats();
+      updateGroupingAffordance();
+      persist();  // re-persist now that grouping is cleared
     } else if (key === 'sub') {
       currentStep = 0;
     } else if (key === 'accent') {
@@ -1643,8 +2188,9 @@
     document.documentElement.style.color = c.ink;
     document.body.style.background = c.bg;
     document.body.style.color = c.ink;
-    // Button shows what you'll switch TO, not the current state.
-    el.themeToggle.textContent = mode === 'dark' ? '☀' : '☾';
+    // v58: icon swap is handled by CSS based on data-theme attribute,
+    // so we only update aria-label here. (The button shows what you'll
+    // switch TO, not the current state — accessibility-wise as well.)
     el.themeToggle.setAttribute(
       'aria-label',
       mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
@@ -1715,8 +2261,35 @@
   el.closeHelp.addEventListener('click', closeHelp);
   el.themeToggle.addEventListener('click', toggleTheme);
 
+  // (v60) Odd-meters accordion: manual toggle. Reads current state
+  // from aria-expanded so it doesn't matter whether the panel was
+  // opened by syncOddMetersAccordion (because state.sig is odd) or
+  // by a previous manual click.
+  const oddMetersToggleBtn = document.getElementById('oddMetersToggle');
+  if (oddMetersToggleBtn) {
+    oddMetersToggleBtn.addEventListener('click', () => {
+      const isOpen = oddMetersToggleBtn.getAttribute('aria-expanded') === 'true';
+      setOddMetersOpen(!isOpen);
+    });
+  }
+
   document.querySelectorAll('.segments').forEach(group => {
     group.addEventListener('click', handleSegmentClick);
+  });
+
+  // (v61) Grouping affordance event wiring.
+  const groupingChipBtn = document.getElementById('groupingChip');
+  if (groupingChipBtn) {
+    groupingChipBtn.addEventListener('click', function (e) {
+      e.stopPropagation();  // prevent the doc-level outside-click handler from immediately closing
+      toggleGroupingPopover();
+    });
+  }
+  // Click outside the popover closes it.
+  document.addEventListener('click', function (e) {
+    const wrap = document.getElementById('groupingWrap');
+    if (!wrap || wrap.hidden) return;
+    if (!wrap.contains(e.target)) closeGroupingPopover();
   });
 
   document.addEventListener('keydown', (e) => {
@@ -1725,6 +2298,16 @@
       e.preventDefault();
       closeAnyModal();
       return;
+    }
+    // Escape also closes the grouping popover (it's not a modal but
+    // shares the dismiss-via-Escape convention).
+    if (e.key === 'Escape') {
+      const chip = document.getElementById('groupingChip');
+      if (chip && chip.getAttribute('aria-expanded') === 'true') {
+        e.preventDefault();
+        closeGroupingPopover();
+        return;
+      }
     }
     // Don't hijack keys while typing in the BPM input
     if (e.target === el.bpm) return;
